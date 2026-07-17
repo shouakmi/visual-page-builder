@@ -10,31 +10,32 @@ the news.
 
 ## Where we are
 
-**Phase C and Phase D are both complete.** The style compiler (D1), the renderer (D2), the sandboxed
-canvas frame (D3), and the app wiring (D4) have all landed. The editor now has a face.
+**Phases A–D are complete; Phase E is underway — E1 (selection + overlay) has landed.** The canvas is
+no longer read-only: click an element to select it, shift/ctrl to multi-select, and a tracking overlay
+draws a box over the selection.
 
 | | |
 | --- | --- |
-| Last session | 2026-07-17 — finished Phase D: renderer, sandboxed frame, and app wiring (D2–D4) |
-| Git | branch **`phase-c`**, **16 commits** ahead of `main` @ `6da69ce`; HEAD is the D4 mutation-set commit. **Not pushed, not merged.** Rename to `phase-d` or merge. |
-| Working tree | Clean (D4 work committed) |
-| `pnpm verify` | Green — **827 tests across 31 files**, build succeeds (re-run 2026-07-17) |
-| `pnpm mutate` | Green — **114/114 caught** (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8) |
+| Last session | 2026-07-17 — Phase E started: E1 selection + overlay (hit-test handle, click wiring, tracking overlay) |
+| Git | branch **`phase-c`**, **17 commits** ahead of `main` @ `6da69ce`; HEAD is the E1 commit. **Not pushed, not merged.** Rename to `phase-e` or merge. |
+| Working tree | Clean (E1 work committed) |
+| `pnpm verify` | Green — **839 tests across 32 files**, build succeeds (re-run 2026-07-17) |
+| `pnpm mutate` | Green — **121/121 caught** (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7) |
 
-Done: **A**, **B1**, **B2**, **B3**, **C**, and all of **D** (D1 compiler, D2 renderer, D3 sandboxed
-frame, D4 app wiring — now with its own mutation set).
+Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), and **E1** (selection + overlay).
 
-> Test counts by project: `core` 527, `state` 157, `renderer` 48, `tokens` 48, `ui` 34, `web` 13 = 827.
+> Test counts by project: `core` 527, `state` 157, `renderer` 52, `tokens` 48, `ui` 34, `web` 21 = 839.
 >
-> The branch is still named `phase-c` and now carries all of Phase D. Rename or merge before it gets
-> confusing.
+> The branch is still named `phase-c` and now carries all of D and the start of E. Rename or merge
+> before it gets confusing.
 
-**The editor is real and now renders.** Every edit, undo and redo works, the model compiles to real
-CSS, and `apps/web` mounts a live canvas: `Canvas.tsx` reads `present` from the store, compiles the
-active page with `compileStyleSheet`, renders its tree through `@vpb/renderer`'s `RenderChildren`
-inside a `CanvasFrame` that cannot run page code, and sizes the frame to the active breakpoint so the
-real media queries fire. It opens on `starterProject.ts` — a real `Project` built through core's
-public API, exercising a shared class, a node-local override, `:hover`, and a mobile rule.
+**The canvas is interactive.** On top of the D4 wiring (`Canvas.tsx` reads `present`, compiles with
+`compileStyleSheet`, renders through `RenderChildren` inside a `CanvasFrame`, sizes to the active
+breakpoint), E1 adds selection: the renderer stamps a `data-vpb-node-id` hit-test handle on every
+element, `Canvas` attaches a `pointerdown` listener to the frame document (via `onReady`) that walks
+from the click to the nearest handle and calls `select`/`extendSelection`/`clearSelection`, and
+`SelectionLayer` draws a box over each selected element — re-measured on `ResizeObserver`,
+`MutationObserver`, frame scroll, and window resize (the observers AUDIT §4.14 was missing).
 
 ### Commits on `phase-c`
 
@@ -188,7 +189,7 @@ The phase's spec (AUDIT §8) is met. What remains is deliberate scope, not omiss
 - **`git core.autocrlf=true` on this machine.** Harmless so far — commits contain only real changes —
   but the mutation harness writes LF and every `git add` prints conversion warnings. Worth an
   `.gitattributes` if it ever bites.
-- **`phase-c` is unpushed and unmerged, and now carries all of Phase D.** 16 commits ahead of `main`.
+- **`phase-c` is unpushed and unmerged, and now carries all of D plus E1.** 17 commits ahead of `main`.
 - **B2's mutation set did not exist** until `1bc94c7`, despite the README claiming "B2 and B3 were
   both built this way". It was presumably lost with the two suites in the 2026-07-17 incident, and
   nothing noticed — **a missing mutation set fails silently by definition.** `b2-cascade.mjs` now
@@ -197,6 +198,64 @@ The phase's spec (AUDIT §8) is met. What remains is deliberate scope, not omiss
   declarations, serialisation) still has no mutation coverage.
 
 These items are still deferred as noted; none of them blocks Phase E.
+
+---
+
+## Phase E — where it stands
+
+**Underway. E1 (selection + overlay) is done; E2–E5 are planned but not built.** The full plan is in
+`C:\Users\hp\.claude\plans\rustling-toasting-badger.md` (or ask for it) — it designs all of E and the
+architecture that holds across it. The load-bearing decisions, so nobody reverses them:
+
+- **DOM → NodeId is a dedicated `data-vpb-node-id` attribute, NOT the `n-<id>` styling class.** Stamped
+  centrally in `renderNode` (`packages/renderer/src/RenderTree.tsx`) via `cloneElement`, so every
+  renderer — including a plugin's — carries it. Reverse-parsing the CSS class would collide with a user
+  class named literally `n-…`; the attribute keeps hit-testing off the styling encoding.
+- **Selection hit-testing uses `element.closest(...)`, NOT `instanceof Element`.** The frame is
+  `allow-same-origin`, so React creates the portaled nodes in the FRAME's realm; a parent-realm
+  `instanceof Element` is `false` for every one of them and selection would silently never fire in a
+  real browser. `closest` is a plain method on any Element, realm or not. (jsdom happens to be lax here,
+  so only a real browser would have caught it — it is commented in `Canvas.tsx`.)
+- **The overlay lives in the EDITOR document, `pointer-events-none`, positioned over the frame**
+  (`apps/web/src/SelectionLayer.tsx`). It reads element rects out of the frame and re-measures on
+  `ResizeObserver` + `MutationObserver` + frame `scroll` (capture) + window `resize` — the four the
+  prototype lacked (AUDIT §4.14). Clicks land in the frame because the overlay does not capture them.
+- **Selection reads `present.context.selection`.** But note: context edits go through the store's
+  `withBoth`, so selection is mirrored to `present` AND `committed` — they never differ for a selection
+  change. So a "reads committed instead of present" mutation on the overlay would SURVIVE and is
+  deliberately **not** in the E1 set; that invariant is the canvas's (covered by D4). It will start to
+  matter for the overlay only once a drag previews a selection change (E2).
+
+Testing notes for the next session:
+
+- **The `web` project renders into an iframe, so jsdom does no layout** — every `getBoundingClientRect`
+  is zero. The E1 tests assert *which* node is selected and *which* nodes get a box, never pixels. Box
+  geometry (positions, snap) is not unit-testable in jsdom and will need either a real browser or pure
+  headless geometry (the plan puts that math in `@vpb/interaction` from E2).
+- **jsdom has no `ResizeObserver`** — a no-op stub is in `apps/web/src/test/setup.ts`.
+
+### What E1 shipped
+
+- `packages/renderer/src/RenderTree.tsx` — the `data-vpb-node-id` handle (+ 4 renderer tests).
+- `apps/web/src/Canvas.tsx` — captures the frame doc from `onReady`, the `pointerdown` selection hook.
+- `apps/web/src/SelectionLayer.tsx` — the tracking overlay.
+- `apps/web/src/__tests__/SelectionLayer.test.tsx` — 8 tests (click/shift/clear/replace + overlay).
+- `tools/mutations/e1-selection.mjs` — 7 mutations, all caught.
+
+### Still to do in Phase E (sequenced)
+
+- **E2 — structural drag.** New headless `@vpb/interaction`: `dropTarget(pointer, siblingRects, tree) →
+  {parentId, index}` (before/after/into geometry), node-tested + mutation set. `apps/web`: pointer
+  capture + a transparent shield over the iframe during drag (the §4.1 stall), `preview(moveNodeCommand)`
+  live, `commitPreview()` on drop, `cancelPreview()` on Escape, a drop indicator in the overlay. Reuses
+  core `moveNode` (cycle guard + index adjustment) and state `moveNodeCommand`/`restoreNodePositionCommand`.
+- **E3 — resize.** Overlay handles → `preview(setStylePropertyCommand)` width/height on the active
+  breakpoint/state → commit on release.
+- **E4 — multi-select ops + batching.** `batchCommand` composite in `@vpb/state` (the answer to AUDIT
+  §5.3's "no transaction/batching"; a transaction in an inverse-command history IS a composite with a
+  combined inverse) — delete/move all selected as one history entry. Keyboard shortcuts (Delete,
+  arrow-nudge, Escape, Ctrl+Z/Y wired to store `undo`/`redo`).
+- **E5 — snap guides.** Headless alignment geometry in `@vpb/interaction`; `apps/web` draws the guides.
 
 ---
 

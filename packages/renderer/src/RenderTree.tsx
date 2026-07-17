@@ -1,5 +1,5 @@
 import { childrenOf, getComponent, getNode, type NodeId, type NodeTree } from '@vpb/core';
-import { Fragment, type ReactElement, type ReactNode } from 'react';
+import { Fragment, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react';
 
 import { classNameFor, defaultRenderer, type RenderEnvironment } from './renderers.tsx';
 
@@ -120,11 +120,28 @@ export function renderNode(tree: NodeTree, id: NodeId, env: RenderEnvironment): 
 
   const render = env.renderers.get(node.component) ?? defaultRenderer;
 
-  return render({
+  const element = render({
     node,
     definition,
     className: classNameFor(node),
     children,
     env,
   });
+
+  /*
+   * The hit-test handle for Phase E. Selection, drag and resize all begin with a
+   * DOM element and need its NodeId back. A dedicated attribute keeps that lookup
+   * OFF the styling class (`n-<id>`): a user class named literally `n-anything`
+   * would otherwise be indistinguishable from a node class, and hit-testing would
+   * pick the wrong id. Stamped centrally so every renderer — including a plugin's
+   * — carries it without knowing it exists, exactly as `classNameFor` is added
+   * for them here rather than inside each renderer.
+   *
+   * `renderNode` may return null (hidden or unknown node); only a real element can
+   * carry an attribute. The frame body is not rendered here, so it gets no handle
+   * — a click landing on the bare body means "clear the selection".
+   */
+  return isValidElement(element)
+    ? cloneElement(element as ReactElement<Record<string, unknown>>, { 'data-vpb-node-id': id })
+    : element;
 }

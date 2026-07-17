@@ -164,6 +164,64 @@ describe('class names', () => {
   });
 });
 
+/**
+ * THE INTERACTION CONTRACT — the renderer's half of Phase E's hit-testing.
+ *
+ * Selection, drag and resize all begin with a DOM element and must recover its
+ * NodeId. A dedicated `data-vpb-node-id` attribute is that handle, kept off the
+ * `n-<id>` styling class so a user class named `n-…` cannot be mistaken for a node
+ * class. Stamped centrally in `renderNode`, so this holds for every component —
+ * including a plugin's — without the renderer knowing.
+ */
+describe('hit-test handle', () => {
+  it('stamps each element with its NodeId', () => {
+    const { tree, ids } = editor();
+    const box = make(ids, BOX_COMPONENT_ID);
+    const { container } = renderTree(add(tree, box));
+
+    expect(container.querySelector(`.n-${box.id}`)?.getAttribute('data-vpb-node-id')).toBe(box.id);
+  });
+
+  it('gives every node in the tree its own handle, so `closest` finds the nearest', () => {
+    const { tree, ids } = editor();
+    const outer = make(ids, BOX_COMPONENT_ID);
+    const inner = make(ids, TEXT_COMPONENT_ID, { text: propString('Hi') });
+
+    let next = add(tree, outer);
+    next = add(next, inner, outer.id);
+
+    const { container } = renderTree(next);
+
+    expect(container.querySelector(`[data-vpb-node-id="${outer.id}"]`)).toBe(
+      container.querySelector(`.n-${outer.id}`),
+    );
+    expect(container.querySelector(`[data-vpb-node-id="${inner.id}"]`)).toBe(
+      container.querySelector(`.n-${inner.id}`),
+    );
+  });
+
+  it('stamps a plugin renderer the package has never seen', () => {
+    // Central injection: the handle rides on whatever element the renderer returns.
+    const { tree, ids } = editor();
+    const box = make(ids, BOX_COMPONENT_ID);
+
+    const custom = new Map(createBuiltinRenderers());
+    custom.set(BOX_COMPONENT_ID, ({ className }) => <aside className={className}>plugin</aside>);
+
+    const { container } = renderTree(add(tree, box), { ...env(), renderers: custom });
+    expect(container.querySelector('aside')?.getAttribute('data-vpb-node-id')).toBe(box.id);
+  });
+
+  it('emits no handle for a hidden node — there is no element to carry one', () => {
+    const { tree, ids } = editor();
+    const box = make(ids, BOX_COMPONENT_ID);
+    const next = updateNode(add(tree, box), setHidden(box, true));
+
+    const { container } = renderTree(next);
+    expect(container.querySelector(`[data-vpb-node-id="${box.id}"]`)).toBeNull();
+  });
+});
+
 /* -------------------------------------------------------------------------- */
 /* AUDIT §4.5 — "the renderer is an XSS vector"                                */
 /* -------------------------------------------------------------------------- */

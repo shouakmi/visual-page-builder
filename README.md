@@ -2,14 +2,16 @@
 
 An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web from one codebase.
 
-> **Status: Phase C complete; Phase D complete — there is now something to look at.** The workspace
+> **Status: Phases A–D complete; Phase E underway — the canvas is now interactive.** The workspace
 > installs, typechecks, lints, tests, builds, and themes; `@vpb/core` carries the style/cascade/document
 > model (B1–B3) **and the style compiler** (D1), and `@vpb/state` carries commands, undo/redo, and a
-> headless store (C). Phase D closes the loop end to end: `@vpb/renderer` turns the node tree into
+> headless store (C). Phase D closed the loop end to end: `@vpb/renderer` turns the node tree into
 > escaped React (D2), a sandboxed iframe frame renders it without letting page code touch the editor
 > (D3), and `apps/web` wires the store → the compiler → the renderer → the frame into a live canvas
-> that opens on a real starter project (D4). The canvas renders through **the same compiler the export
-> will call**, so what you see is what Phase I ships. See the [Roadmap](#roadmap).
+> that opens on a real starter project (D4). Phase E adds interaction, starting with **selection (E1)**:
+> click an element to select it, shift/ctrl to multi-select, and a tracking overlay draws a box over
+> the selection. The canvas renders through **the same compiler the export will call**, so what you see
+> is what Phase I ships. See the [Roadmap](#roadmap).
 
 See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
 [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
@@ -50,7 +52,8 @@ pnpm dev          # http://localhost:5173
 ```
 apps/
   web/                  @vpb/web    — the application (also Electron's renderer, Phase J)
-    src/Canvas.tsx                    D4: store -> compiler -> renderer -> sandboxed frame
+    src/Canvas.tsx                    D4/E1: store -> compiler -> renderer -> frame, + click-to-select
+    src/SelectionLayer.tsx            E1: the selection overlay, tracked by observers
     src/starterProject.ts             the real Project the editor opens with (not a mock)
 packages/
   core/                 @vpb/core   — the domain model. Framework-free, no DOM.
@@ -264,13 +267,13 @@ One runner, four projects, each with the environment it needs (`vitest.config.ts
 | ---------- | ----------- | ------------------------------------------------------- | --------------- |
 | `core`     | node        | The model: style, cascade, compiler, tree, document     | 527 tests       |
 | `state`    | node        | Commands, inverses, history, the store                  | 157 tests       |
-| `renderer` | jsdom       | Escaped rendering of the node tree, the sandboxed frame | 48 tests        |
+| `renderer` | jsdom       | Escaped rendering, the sandboxed frame, the hit-test handle | 52 tests     |
 | `tokens`   | node        | Token contract, CSS/TS parity, colour distinction       | 48 tests        |
 | `ui`       | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard      | 34 tests        |
-| `web`      | jsdom       | Canvas wiring (D4) + the `index.html` anti-FOUC contract | 13 tests        |
+| `web`      | jsdom       | Canvas wiring (D4), selection + overlay (E1), the `index.html` contract | 21 tests |
 
 ```bash
-pnpm test                        # everything (827 today)
+pnpm test                        # everything (839 today)
 pnpm vitest run --project core   # one project
 ```
 
@@ -302,10 +305,11 @@ pnpm mutate --list         # show what would run, change nothing
 pnpm mutate --filter cycle # one mutation by name
 ```
 
-Every phase is built this way; **114 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
+Every phase is built this way; **121 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
 C, 12 for D1, 12 for D2 (the renderer: escaping, `isSafeUrl`, the `componentId -> React` map), 9 for D3
-(the sandboxed frame: the `sandbox` attribute, incremental reconciliation), and 8 for D4 (the app
-wiring: `present` vs `committed`, the active page, the per-page node filter, device sizing).
+(the sandboxed frame: the `sandbox` attribute, incremental reconciliation), 8 for D4 (the app wiring:
+`present` vs `committed`, the active page, the per-page node filter, device sizing), and 7 for E1 (the
+hit-test handle, the click→node walk, multi-select, the overlay).
 
 Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
 their first run, which proves only that they were written against code that already passed them.
@@ -389,7 +393,7 @@ the code still compiles and the tests still pass — which is precisely why it i
 | **B3** | **Document — node tree + index, component registry, page/project. ✅**          |
 | **C**  | **Commands, inverse-command history, Zustand store — headless and testable. ✅** |
 | **D**  | **Renderer + style compiler + sandboxed canvas, wired into the app; the shared-compiler WYSIWYG invariant. ✅ Done.** |
-| E     | Interaction: overlay, structural drag, resize, multi-select, snap guides    |
+| E     | Interaction: overlay, structural drag, resize, multi-select, snap guides. **Selection (E1) ✅; drag next** |
 | F     | Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets  |
 | G     | HTML/CSS importer — the validator of the Phase B model                      |
 | H     | Style panel + component library                                             |
