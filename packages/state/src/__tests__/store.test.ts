@@ -166,6 +166,47 @@ describe('preview / commitPreview', () => {
     expect(store.getState().history.past).toHaveLength(1);
   });
 
+  /**
+   * The test above cannot actually tell where a preview is applied.
+   *
+   * `setStyleProperty` ASSIGNS, so re-applying it to the previous preview lands
+   * on the same width as applying it to `committed` — the assertion passes
+   * either way. This one uses an edit that is not idempotent: the same insert,
+   * previewed twice. Against `committed` both succeed and the node appears once;
+   * against the previous preview the second is refused, because the node it is
+   * inserting is already there.
+   */
+  it('re-previewing the same insert succeeds and inserts once', () => {
+    const { store, ids } = makeStore();
+    const box = boxNode(ids);
+
+    const first = store.getState().preview(insertNodeCommand(box, rootOf(store)));
+    const second = store.getState().preview(insertNodeCommand(box, rootOf(store)));
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(childrenOf(store)).toEqual([box.id]);
+  });
+
+  it('a new preview supersedes the previous one rather than stacking on it', () => {
+    // `pending` holds ONE command. Previewing a different edit discards the
+    // first, which is why each preview starts from `committed`.
+    const { store, ids } = makeStore();
+    const box = boxNode(ids);
+    store.getState().execute(insertNodeCommand(box, rootOf(store)));
+
+    store
+      .getState()
+      .preview(setStylePropertyCommand(nodeScope(box.id), base, 'width', px(50), ruleId('r1')));
+    store
+      .getState()
+      .preview(setStylePropertyCommand(nodeScope(box.id), base, 'height', px(80), ruleId('r1')));
+
+    const rule = findRule(store.getState().present.project.styles, nodeScope(box.id), base);
+    expect(rule?.declarations.height).toEqual(px(80));
+    expect(rule?.declarations.width).toBeUndefined();
+  });
+
   it('records exactly ONE entry for a whole drag', () => {
     const { store, ids } = makeStore();
     const box = boxNode(ids);

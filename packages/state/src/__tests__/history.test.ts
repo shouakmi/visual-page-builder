@@ -387,6 +387,35 @@ describe('undo / redo', () => {
     expect(undone.state.context.selection).toEqual([box.id]);
   });
 
+  /**
+   * The recorded context OUTRANKS whatever the inverse command selects.
+   *
+   * The test above cannot tell the difference: undoing a delete runs
+   * `insertSubtreeCommand`, which selects the node it restores — the same answer
+   * the recorded context gives, by coincidence. This one separates them. Undoing
+   * an INSERT runs `removeNodeCommand`, whose own selection ends up empty, while
+   * the context recorded before the insert had a different node selected. Only a
+   * real restore returns the user to `first`.
+   */
+  it('restores the recorded selection even when the inverse selects something else', () => {
+    const { state, ids } = editor();
+    const root = activePage(state).tree.root;
+    const first = node(ids);
+    const seeded = commit(state, createHistory(), insertNodeCommand(first, root), 0);
+
+    // Put the selection somewhere the inverse will not put it back.
+    const selected = select(seeded.state, [first.id]);
+    expect(selected.context.selection).toEqual([first.id]);
+
+    const second = node(ids);
+    const inserted = commit(selected, seeded.history, insertNodeCommand(second, root), 1000);
+    expect(inserted.state.context.selection).toEqual([second.id]);
+
+    const undone = undo(inserted.state, inserted.history, env);
+    if (!undone) throw new Error('expected an undo');
+    expect(undone.state.context.selection).toEqual([first.id]);
+  });
+
   it('undoes onto the page the edit happened on, not the page being viewed', () => {
     /*
      * Commands act on the ACTIVE page. Undoing while the user has navigated

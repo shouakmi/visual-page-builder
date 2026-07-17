@@ -142,13 +142,14 @@ export function setStylePropertyCommand(
  * Remove one property from one (scope, target).
  *
  * Core drops the whole rule when its last property goes, so undoing this can have
- * to recreate the rule — which is why the inverse carries a rule id of its own.
+ * to recreate the rule — and the inverse hands back the rule's OWN id, read at
+ * apply time, so an undo restores the rule that was there rather than a lookalike
+ * with a new identity.
  */
 export function unsetStylePropertyCommand(
   scope: StyleScope,
   target: StyleTarget,
   property: StyleProperty,
-  ruleId?: StyleRuleId,
 ): Command {
   return {
     kind: 'unsetStyleProperty',
@@ -171,10 +172,7 @@ export function unsetStylePropertyCommand(
 
       // Reuse the rule's own id when restoring, so an undo puts back the rule
       // that was there rather than a lookalike with a new identity.
-      return succeed(
-        next,
-        setStylePropertyCommand(scope, target, property, previous, ruleId ?? existing.id),
-      );
+      return succeed(next, setStylePropertyCommand(scope, target, property, previous, existing.id));
     },
   };
 }
