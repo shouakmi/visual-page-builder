@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "displayName": "VPB Base",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+
+    /**
+     * "bundler" makes TypeScript honour the `exports` field of package.json the
+     * same way Vite/Rollup do. This is what lets `import { x } from "@vpb/ui"`
+     * resolve with NO path aliases anywhere in the repo: pnpm symlinks
+     * node_modules/@vpb/ui -> packages/ui, and TS follows its exports map.
+     *
+     * The previous prototype needed tsconfig `paths` AND vite `resolve.alias`
+     * kept manually in sync, and had neither working. Deleting the concept
+     * entirely is strictly better than fixing it twice.
+     */
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    "jsx": "react-jsx",
+
+    /* --- Strictness. Non-negotiable; the brief asks for strong typing. --- */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "useUnknownInCatchVariables": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "skipLibCheck": true
+  },
+  "exclude": ["node_modules", "dist", "coverage"]
+}

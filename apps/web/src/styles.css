@@ -1,0 +1,107 @@
+@import 'tailwindcss';
+@import '@vpb/tokens/theme.css';
+
+/**
+ * Tell Tailwind to scan the shared UI package.
+ *
+ * THIS LINE IS THE FIX FOR A SPECIFIC, SILENT, PRODUCTION-ONLY BUG.
+ *
+ * Tailwind only emits utilities it can see used. Its automatic source detection
+ * starts at the project root and — by design — skips anything in node_modules.
+ * `@vpb/ui` is symlinked INTO node_modules by pnpm, so every class in every
+ * shared component (`bg-surface-raised`, `text-foreground`, ...) would be
+ * invisible to the scanner and omitted from the stylesheet.
+ *
+ * The cruelty is in the failure mode: `vite dev` often still looks right, because
+ * some other file happened to use the same class. `vite build` then ships an app
+ * with unstyled panels and buttons. The prototype this project replaces had
+ * exactly this bug (content globs scoped to apps/web only) and could never have
+ * discovered it, because it was never built.
+ *
+ * Any future package containing Tailwind classes must be added here.
+ */
+@source '../../../packages/ui/src';
+
+/**
+ * Class-based dark mode.
+ *
+ * v4's default `dark:` variant is `prefers-color-scheme`, which is global and
+ * therefore useless to us: the editor chrome and the user's page have
+ * independent colour schemes, and a light page must be previewable inside dark
+ * chrome. `:where()` keeps specificity at zero so the variant never wins an
+ * unintended cascade fight.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/**
+ * Bind semantic tokens to Tailwind's colour namespace, producing `bg-surface`,
+ * `text-foreground-muted`, `ring-ring`, and so on.
+ *
+ * `@theme inline` (rather than plain `@theme`) makes the generated utility emit
+ * `var(--vpb-color-*)` instead of the resolved value. That indirection is what
+ * lets a single `.dark` class on <html> restyle the entire application, with no
+ * duplicate `dark:` variant on any component.
+ */
+@theme inline {
+  --color-surface: var(--vpb-color-surface);
+  --color-surface-raised: var(--vpb-color-surface-raised);
+  --color-surface-sunken: var(--vpb-color-surface-sunken);
+
+  --color-border: var(--vpb-color-border);
+  --color-border-strong: var(--vpb-color-border-strong);
+
+  --color-foreground: var(--vpb-color-foreground);
+  --color-foreground-muted: var(--vpb-color-foreground-muted);
+  --color-foreground-subtle: var(--vpb-color-foreground-subtle);
+
+  --color-accent: var(--vpb-color-accent);
+  --color-accent-hover: var(--vpb-color-accent-hover);
+  --color-accent-foreground: var(--vpb-color-accent-foreground);
+
+  --color-danger: var(--vpb-color-danger);
+  --color-danger-foreground: var(--vpb-color-danger-foreground);
+  --color-success: var(--vpb-color-success);
+  --color-warning: var(--vpb-color-warning);
+
+  --color-overlay: var(--vpb-color-overlay);
+  --color-selection: var(--vpb-color-selection);
+  --color-ring: var(--vpb-color-ring);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    /* The editor chrome is an application, not a document: it never page-scrolls,
+       and text selection inside chrome is a drag-gesture hazard. Both are
+       re-enabled explicitly on the canvas and in text-editing surfaces. */
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    font-family:
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      'Segoe UI',
+      Roboto,
+      'Helvetica Neue',
+      Arial,
+      sans-serif;
+  }
+
+  /* Respect users who ask the OS to reduce motion. Non-negotiable in a tool
+     people stare at for eight hours. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

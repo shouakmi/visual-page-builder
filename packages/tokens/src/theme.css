@@ -1,0 +1,93 @@
+/**
+ * The semantic tokens, as CSS custom properties, for both colour modes.
+ *
+ * This file is the CSS half of a two-representation contract: `semantic.ts` is
+ * the TypeScript half. Every token in `SEMANTIC_TOKENS` must appear here under
+ * the name `cssVarName()` generates, in BOTH blocks. `tokens.test.ts` derives the
+ * expected property names from the token list and fails the build on any drift —
+ * so this file is never edited alone.
+ *
+ * WHY A `.dark` CLASS, NOT `prefers-color-scheme`. A page builder must render a
+ * light page preview inside dark editor chrome; the user's design has a colour
+ * scheme independent of the tool's. A media query is global and cannot express
+ * that. A class can be scoped to a subtree.
+ *
+ * Values are the resolved primitives from `palette.ts`. They are written out
+ * rather than referenced through another `var()` layer so that DevTools shows a
+ * real colour on the computed property, and so a token can be read without
+ * resolving a chain.
+ */
+
+:root {
+  /* Surfaces */
+  --vpb-color-surface: #fafafa; /* neutral.50 */
+  --vpb-color-surface-raised: #ffffff; /* common.white */
+  --vpb-color-surface-sunken: #f4f4f5; /* neutral.100 */
+
+  /* Lines */
+  --vpb-color-border: #e4e4e7; /* neutral.200 */
+  --vpb-color-border-strong: #d4d4d8; /* neutral.300 */
+
+  /* Text */
+  --vpb-color-foreground: #18181b; /* neutral.900 */
+  --vpb-color-foreground-muted: #71717a; /* neutral.500 */
+  --vpb-color-foreground-subtle: #a1a1aa; /* neutral.400 */
+
+  /* Accent */
+  --vpb-color-accent: #2563eb; /* blue.600 */
+  --vpb-color-accent-hover: #1d4ed8; /* blue.700 */
+  --vpb-color-accent-foreground: #ffffff; /* common.white */
+
+  /* Status */
+  --vpb-color-danger: #dc2626; /* red.600 */
+  --vpb-color-danger-foreground: #ffffff; /* common.white */
+  --vpb-color-success: #16a34a; /* green.600 */
+  --vpb-color-warning: #d97706; /* amber.600 */
+
+  /* Editor chrome */
+  --vpb-color-overlay: rgb(0 0 0 / 0.4);
+  --vpb-color-selection: #3b82f6; /* blue.500 */
+  --vpb-color-ring: #3b82f6; /* blue.500 */
+
+  color-scheme: light;
+}
+
+.dark {
+  /* Surfaces */
+  --vpb-color-surface: #18181b; /* neutral.900 */
+  --vpb-color-surface-raised: #27272a; /* neutral.800 */
+  --vpb-color-surface-sunken: #09090b; /* neutral.950 */
+
+  /**
+   * Lines. `border` must stay LIGHTER than `surface-raised` (#27272a). The
+   * obvious-looking neutral.800 is exactly surface-raised, which makes every
+   * dark-mode panel border invisible against its own background — a bug this
+   * file shipped with until a running browser reported `panelBg === panelBorder`.
+   * `surfaceDistinction` in tokens.test.ts fails the build if they collide again.
+   */
+  --vpb-color-border: #3f3f46; /* neutral.700 */
+  --vpb-color-border-strong: #52525b; /* neutral.600 */
+
+  /* Text */
+  --vpb-color-foreground: #fafafa; /* neutral.50 */
+  --vpb-color-foreground-muted: #a1a1aa; /* neutral.400 */
+  --vpb-color-foreground-subtle: #71717a; /* neutral.500 */
+
+  /* Accent */
+  --vpb-color-accent: #3b82f6; /* blue.500 */
+  --vpb-color-accent-hover: #60a5fa; /* blue.400 */
+  --vpb-color-accent-foreground: #ffffff; /* common.white */
+
+  /* Status */
+  --vpb-color-danger: #ef4444; /* red.500 */
+  --vpb-color-danger-foreground: #ffffff; /* common.white */
+  --vpb-color-success: #22c55e; /* green.500 */
+  --vpb-color-warning: #f59e0b; /* amber.500 */
+
+  /* Editor chrome */
+  --vpb-color-overlay: rgb(0 0 0 / 0.6);
+  --vpb-color-selection: #3b82f6; /* blue.500 */
+  --vpb-color-ring: #60a5fa; /* blue.400 */
+
+  color-scheme: dark;
+}

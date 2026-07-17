@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Visual Page Builder</title>
+
+    <!--
+      Anti-FOUC theme bootstrap.
+
+      This runs BEFORE first paint and before React exists. Without it, the
+      document paints light, React mounts, ThemeProvider's effect adds `.dark`,
+      and a dark-mode user is flashed white for one frame on every single load.
+      That flash is the single most common "cheap feeling" tell in a desktop-class
+      web app, and it cannot be fixed from inside React — by the time any effect
+      runs, the paint has already happened.
+
+      It is inline (not a module) because a module is deferred, which would put us
+      right back after first paint.
+
+      COUPLING: the storage key below is duplicated from THEME_STORAGE_KEY in
+      @vpb/ui. It cannot be imported — this must execute before any bundle loads.
+      apps/web/src/__tests__/bootstrap.test.ts asserts the two stay equal, so the
+      duplication is enforced rather than merely hoped for.
+    -->
+    <script>
+      (function () {
+        try {
+          var pref = window.localStorage.getItem('vpb.theme.preference');
+          var explicitDark = pref === 'dark';
+          var followsSystem = pref === 'system' || pref === null || pref === undefined;
+          var systemDark =
+            typeof window.matchMedia === 'function' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+          if (explicitDark || (followsSystem && systemDark)) {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) {
+          /* Storage blocked. Fall through to light; React will correct it. */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

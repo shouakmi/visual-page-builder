@@ -1,0 +1,49 @@
+{
+  "name": "visual-page-builder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "An enterprise-grade visual page builder. Monorepo root.",
+  "license": "MIT",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @vpb/web dev",
+    "build": "pnpm --filter @vpb/web build",
+    "preview": "pnpm --filter @vpb/web preview",
+    "typecheck": "pnpm -r --parallel typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "encoding:check": "node ./tools/fix-encoding.mjs --check",
+    "encoding:fix": "node ./tools/fix-encoding.mjs",
+    "mutate": "node ./tools/mutate.mjs",
+    "verify": "pnpm typecheck && pnpm lint && pnpm encoding:check && pnpm test && pnpm build",
+    "clean": "node ./tools/clean.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^24.0.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^9.0.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^16.0.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.9.5",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.64.0",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}

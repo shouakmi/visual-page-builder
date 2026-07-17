@@ -1,0 +1,9 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm@10 no longer runs dependency lifecycle scripts by default (a supply-chain
+# hardening measure). Any dependency that legitimately needs a postinstall build
+# step must be listed here explicitly. Empty today, and every future addition
+# should be justified in review.
+onlyBuiltDependencies: []

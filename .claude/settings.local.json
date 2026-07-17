@@ -1,0 +1,5 @@
+{
+  "permissions": {
+    "allow": ["Bash(wc -l \"C:/Users/hp/Downloads/Build_a complete visual page editor.md\")"]
+  }
+}

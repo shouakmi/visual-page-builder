@@ -1,0 +1,21 @@
+{
+  "name": "@vpb/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The editor domain model: identity, style vocabulary, cascade, node tree, component registry. Framework-free.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "nanoid": "^6.0.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "^4.1.10"
+  }
+}
