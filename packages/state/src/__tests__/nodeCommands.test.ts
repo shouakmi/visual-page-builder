@@ -34,6 +34,7 @@ import {
   insertNodeCommand,
   insertSubtreeCommand,
   moveNodeCommand,
+  planDuplicateNode,
   removeNodeCommand,
   restoreNodePositionCommand,
 } from '../commands/nodeCommands.ts';
@@ -371,6 +372,110 @@ describe('insertSubtreeCommand', () => {
     expect(
       refusalOf(state, insertSubtreeCommand([node], a, activePage(state).tree.root, 0)),
     ).toMatch(/already in the tree/);
+  });
+});
+
+describe('planDuplicateNode', () => {
+  function plan(state: EditorState, id: NodeId, ids: IdFactory): Command {
+    const planned = planDuplicateNode(state, id, ids);
+    if (!planned.ok) throw new Error(`expected a plan, got: ${planned.reason}`);
+    return planned.command;
+  }
+
+  it('inserts the copy directly after the original', () => {
+    const { state, boxes, ids } = editorWith(2);
+    const [a, b] = boxes as [NodeId, NodeId];
+
+    const { state: next } = run(state, plan(state, a, ids));
+    const children = childrenOfRoot(next);
+
+    expect(children).toHaveLength(3);
+    expect(children[0]).toBe(a);
+    expect(children[2]).toBe(b);
+    expectConsistent(next);
+  });
+
+  it('copies the subtree with fresh ids, sharing none with the original', () => {
+    const { state, boxes, ids } = editorWith(1);
+    const [a] = boxes as [NodeId];
+    const child = createNode(definition(TEXT_COMPONENT_ID), ids);
+    const { state: seeded } = run(state, insertNodeCommand(child, a));
+
+    const { state: next } = run(seeded, plan(seeded, a, ids));
+    const copyId = childrenOfRoot(next)[1] as NodeId;
+
+    expect(copyId).not.toBe(a);
+    const copyChildren = childIdsOf(activePage(next).tree, copyId);
+    expect(copyChildren).toHaveLength(1);
+    expect(copyChildren[0]).not.toBe(child.id);
+    expectConsistent(next);
+  });
+
+  it('copies the node-scoped style rules onto the copy', () => {
+    // core's duplicateNode deliberately does NOT copy rules; it returns an idMap
+    // and expects this layer to. Without it the duplicate is an unstyled clone.
+    const { state, boxes, ids } = editorWith(1);
+    const [a] = boxes as [NodeId];
+    const styled = styleNode(state, a, ids);
+
+    const { state: next } = run(styled, plan(styled, a, ids));
+    const copyId = childrenOfRoot(next)[1] as NodeId;
+
+    const copied = rulesForScope(next.project.styles, nodeScope(copyId));
+    expect(copied).toHaveLength(1);
+    expect(copied[0]?.declarations).toEqual(
+      rulesForScope(styled.project.styles, nodeScope(a))[0]?.declarations,
+    );
+    // The original keeps its own rule, under its own id.
+    expect(rulesForScope(next.project.styles, nodeScope(a))).toHaveLength(1);
+    expect(copied[0]?.id).not.toBe(rulesForScope(next.project.styles, nodeScope(a))[0]?.id);
+  });
+
+  it('redoes to the SAME ids — the reason it is planned, not minted in apply', () => {
+    const { state, boxes, ids } = editorWith(1);
+    const [a] = boxes as [NodeId];
+
+    const command = plan(state, a, ids);
+    const { state: duplicated, inverse } = run(state, command);
+    const copyId = childrenOfRoot(duplicated)[1] as NodeId;
+
+    const { state: undone, inverse: redo } = run(duplicated, inverse);
+    const { state: redone } = run(undone, redo);
+
+    expect(childrenOfRoot(redone)[1]).toBe(copyId);
+  });
+
+  it('undoes cleanly, taking the copied rules with it', () => {
+    const { state, boxes, ids } = editorWith(1);
+    const [a] = boxes as [NodeId];
+    const styled = styleNode(state, a, ids);
+
+    const { state: duplicated, inverse } = run(styled, plan(styled, a, ids));
+    const { state: undone } = run(duplicated, inverse);
+
+    expect(childrenOfRoot(undone)).toEqual([a]);
+    expect(orphanedNodeScopes(undone.project)).toEqual([]);
+    expectConsistent(undone);
+  });
+
+  it('refuses to duplicate the page root', () => {
+    const { state, ids } = editorWith(1);
+    const planned = planDuplicateNode(state, activePage(state).tree.root, ids);
+    expect(planned.ok).toBe(false);
+    expect(planned.ok === false && planned.reason).toMatch(/root cannot be duplicated/);
+  });
+
+  it('refuses an unknown node', () => {
+    const { state, ids } = editorWith(1);
+    const planned = planDuplicateNode(state, 'ghost' as NodeId, ids);
+    expect(planned.ok).toBe(false);
+  });
+
+  it('is labelled Duplicate, not Restore', () => {
+    const { state, boxes, ids } = editorWith(1);
+    const command = plan(state, boxes[0] as NodeId, ids);
+    expect(command.kind).toBe('duplicateNode');
+    expect(command.label).toBe('Duplicate');
   });
 });
 

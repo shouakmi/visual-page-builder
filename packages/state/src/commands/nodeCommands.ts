@@ -1,7 +1,8 @@
-import type { Node, NodeId, NodeTree, Page, Project, StyleRule } from '@vpb/core';
+import type { IdFactory, Node, NodeId, NodeTree, Page, Project, StyleRule } from '@vpb/core';
 import {
   canDropNode,
   canInsertComponent,
+  duplicateNode,
   getComponent,
   getNode,
   insertNode,
@@ -19,7 +20,7 @@ import {
   updatePageBy,
 } from '@vpb/core';
 
-import type { Command, EditorEnvironment } from '../command.ts';
+import type { Command, CommandRefusal, EditorEnvironment } from '../command.ts';
 import { refuse, succeed } from '../command.ts';
 import { activePage, select, type EditorState } from '../editorState.ts';
 
@@ -210,6 +211,61 @@ export function insertSubtreeCommand(
       return succeed(select(next, [subtreeRootId]), removeNodeCommand(subtreeRootId));
     },
   };
+}
+
+/* ------------------------------------------------------------- duplicate */
+
+/** A command that could be built, or the reason it could not. */
+export type CommandPlan = { readonly ok: true; readonly command: Command } | CommandRefusal;
+
+/**
+ * Plan a duplicate. PLANNED, not a plain command factory, and the distinction
+ * matters.
+ *
+ * Core's `duplicateNode` mints fresh ids — it must, since "two nodes sharing an
+ * id would make `nodes` collide and node-scoped style rules apply to both". If
+ * that minting happened inside `apply`, a redo would build the copy with
+ * *different* ids than the undo threw away, orphaning any rule or selection
+ * pointing at the first set. So all of it happens HERE, once, against the state
+ * the user is looking at: the copies and their rules become data the command
+ * carries, and `apply` merely inserts them. Redo then replays the identical
+ * document.
+ *
+ * This is also where `tree.ts`'s deliberate omission is paid off. Core copies
+ * the nodes and NOT their node-scoped rules, because the tree layer knows
+ * nothing about the stylesheet — it hands back an `idMap` and expects the
+ * command layer to do the rule copy. This is that.
+ */
+export function planDuplicateNode(state: EditorState, id: NodeId, ids: IdFactory): CommandPlan {
+  const tree = activePage(state).tree;
+
+  if (!tree.nodes.has(id)) return refuse(`Node ${id} is not in the tree.`);
+  if (id === tree.root) return refuse('The page root cannot be duplicated.');
+
+  const parentId = parentIdOf(tree, id);
+  if (parentId === undefined) return refuse(`Node ${id} has no parent.`);
+
+  const { tree: duplicated, newId, idMap } = duplicateNode(tree, id, ids);
+  if (!newId) return refuse(`Node ${id} could not be duplicated.`);
+
+  const nodes = subtreeIds(duplicated, newId)
+    .map((copyId) => duplicated.nodes.get(copyId))
+    .filter(isNode);
+
+  // Re-scope each original's rules onto its copy. Without this the duplicate is
+  // an unstyled clone, which reads as a bug in the duplicate rather than a
+  // missing step in the command.
+  const rules: StyleRule[] = [];
+  for (const [originalId, copyId] of idMap) {
+    for (const rule of rulesForScope(state.project.styles, nodeScope(originalId))) {
+      rules.push({ ...rule, id: ids.styleRule(), scope: nodeScope(copyId) });
+    }
+  }
+
+  const insert = insertSubtreeCommand(nodes, newId, parentId, siblingIndex(tree, id) + 1, rules);
+  // Same behaviour, honest name: the undo menu should say "Duplicate", and
+  // `kind` is what telemetry and tests match on.
+  return { ok: true, command: { ...insert, kind: 'duplicateNode', label: 'Duplicate' } };
 }
 
 /* ------------------------------------------------------------------ move */

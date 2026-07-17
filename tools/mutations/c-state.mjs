@@ -71,6 +71,33 @@ export default {
       replace: '      return succeed(next, removeNodeCommand(node.id));',
     },
 
+    /* ---- duplicate ----------------------------------------------------- */
+    {
+      // core copies nodes and NOT their node-scoped rules -- it returns an idMap
+      // and expects this layer to do the rule copy. Skipping it yields an
+      // unstyled clone, which reads as a bug in duplicate rather than a missing
+      // step in the command.
+      name: 'duplicate does not copy the original node-scoped style rules',
+      file: 'packages/state/src/commands/nodeCommands.ts',
+      find: '      rules.push({ ...rule, id: ids.styleRule(), scope: nodeScope(copyId) });',
+      replace: '',
+    },
+    {
+      // The copy's rules must be scoped to the COPY. Scoped to the original they
+      // silently overwrite the source's styling.
+      name: 'duplicated rules stay scoped to the original node',
+      file: 'packages/state/src/commands/nodeCommands.ts',
+      find: '      rules.push({ ...rule, id: ids.styleRule(), scope: nodeScope(copyId) });',
+      replace: '      rules.push({ ...rule, id: ids.styleRule(), scope: nodeScope(originalId) });',
+    },
+    {
+      name: 'duplicate inserts before the original instead of after it',
+      file: 'packages/state/src/commands/nodeCommands.ts',
+      find: '  const insert = insertSubtreeCommand(nodes, newId, parentId, siblingIndex(tree, id) + 1, rules);',
+      replace:
+        '  const insert = insertSubtreeCommand(nodes, newId, parentId, siblingIndex(tree, id), rules);',
+    },
+
     /* ---- class order is cascade order --------------------------------- */
     {
       // THE BUG THIS INVERSE EXISTS FOR. resolve.ts orders scopes as

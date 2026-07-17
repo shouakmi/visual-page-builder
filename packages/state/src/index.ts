@@ -30,7 +30,9 @@ export {
   removeNodeCommand,
   moveNodeCommand,
   restoreNodePositionCommand,
+  planDuplicateNode,
 } from './commands/nodeCommands.ts';
+export type { CommandPlan } from './commands/nodeCommands.ts';
 
 export { setStylePropertyCommand, unsetStylePropertyCommand } from './commands/styleCommands.ts';
 
