@@ -10,21 +10,24 @@ the news.
 
 ## Where we are
 
-**Phases A–D are complete; Phase E is underway — E1 (selection + overlay) has landed.** The canvas is
-no longer read-only: click an element to select it, shift/ctrl to multi-select, and a tracking overlay
-draws a box over the selection.
+**Phases A–D complete; Phase E underway — E1 (selection + overlay) done, and E2's drag GEOMETRY
+landed.** Click to select, shift/ctrl to multi-select, a tracking overlay. The headless
+`@vpb/interaction` package now computes where a drop lands (`dropTarget`); wiring it to real pointer
+events in the app is the remaining half of E2 — see the caveat in the Phase E section.
 
 | | |
 | --- | --- |
-| Last session | 2026-07-17 — Phase E started: E1 selection + overlay (hit-test handle, click wiring, tracking overlay) |
-| Git | branch **`phase-c`**, **17 commits** ahead of `main` @ `6da69ce`; HEAD is the E1 commit. **Not pushed, not merged.** Rename to `phase-e` or merge. |
-| Working tree | Clean (E1 work committed) |
-| `pnpm verify` | Green — **839 tests across 32 files**, build succeeds (re-run 2026-07-17) |
-| `pnpm mutate` | Green — **121/121 caught** (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7) |
+| Last session | 2026-07-17 — E1 selection + overlay, then E2 drag geometry (`@vpb/interaction`) |
+| Git | branch **`phase-c`**, **18 commits** ahead of `main` @ `6da69ce`; HEAD is the E2-geometry commit. **Not pushed, not merged.** Rename to `phase-e` or merge. |
+| Working tree | Clean (E2 geometry committed) |
+| `pnpm verify` | Green — **851 tests across 33 files**, build succeeds (re-run 2026-07-17) |
+| `pnpm mutate` | Green — **125/125 caught** (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 4) |
 
-Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), and **E1** (selection + overlay).
+Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), **E1** (selection + overlay), and
+**E2 geometry** (the headless `dropTarget`).
 
-> Test counts by project: `core` 527, `state` 157, `renderer` 52, `tokens` 48, `ui` 34, `web` 21 = 839.
+> Test counts by project: `core` 527, `state` 157, `interaction` 12, `renderer` 52, `tokens` 48,
+> `ui` 34, `web` 21 = 851.
 >
 > The branch is still named `phase-c` and now carries all of D and the start of E. Rename or merge
 > before it gets confusing.
@@ -189,7 +192,8 @@ The phase's spec (AUDIT §8) is met. What remains is deliberate scope, not omiss
 - **`git core.autocrlf=true` on this machine.** Harmless so far — commits contain only real changes —
   but the mutation harness writes LF and every `git add` prints conversion warnings. Worth an
   `.gitattributes` if it ever bites.
-- **`phase-c` is unpushed and unmerged, and now carries all of D plus E1.** 17 commits ahead of `main`.
+- **`phase-c` is unpushed and unmerged, and now carries all of D plus E1 and E2 geometry.** 18 commits
+  ahead of `main`.
 - **B2's mutation set did not exist** until `1bc94c7`, despite the README claiming "B2 and B3 were
   both built this way". It was presumably lost with the two suites in the 2026-07-17 incident, and
   nothing noticed — **a missing mutation set fails silently by definition.** `b2-cascade.mjs` now
@@ -203,9 +207,10 @@ These items are still deferred as noted; none of them blocks Phase E.
 
 ## Phase E — where it stands
 
-**Underway. E1 (selection + overlay) is done; E2–E5 are planned but not built.** The full plan is in
-`C:\Users\hp\.claude\plans\rustling-toasting-badger.md` (or ask for it) — it designs all of E and the
-architecture that holds across it. The load-bearing decisions, so nobody reverses them:
+**Underway. E1 (selection + overlay) is done; E2's drag GEOMETRY is done; E2's app wiring and E3–E5
+are not built.** The full plan is in `C:\Users\hp\.claude\plans\rustling-toasting-badger.md` (or ask for
+it) — it designs all of E and the architecture that holds across it. The load-bearing decisions, so
+nobody reverses them:
 
 - **DOM → NodeId is a dedicated `data-vpb-node-id` attribute, NOT the `n-<id>` styling class.** Stamped
   centrally in `renderNode` (`packages/renderer/src/RenderTree.tsx`) via `cloneElement`, so every
@@ -242,13 +247,43 @@ Testing notes for the next session:
 - `apps/web/src/__tests__/SelectionLayer.test.tsx` — 8 tests (click/shift/clear/replace + overlay).
 - `tools/mutations/e1-selection.mjs` — 7 mutations, all caught.
 
+### What E2 (geometry) shipped
+
+- `packages/interaction/` — new headless package, node Vitest project, `@vpb/core`-only.
+- `src/dropTarget.ts` — `dropTarget(pointer, zone) → {parentId, index}`. Pure arithmetic: counts the
+  children whose midpoint is before the pointer along the stack axis. The zone's `children` INCLUDE the
+  dragged node (when same-parent), because `moveNode`'s index is measured before removal and it does
+  the same-parent decrement itself — pass a list the node was cut from and every reorder is off by one.
+- `src/__tests__/dropTarget.test.ts` — 12 tests; the last three feed the returned index through the
+  real `moveNode` and assert the resulting child order (the contract that actually matters).
+- `tools/mutations/e2-drag.mjs` — 4 mutations (axis, before/after, index count, midpoint-vs-edge).
+
+### The E2 app-wiring caveat — READ BEFORE BUILDING IT
+
+The drag DECISION is headless and fully tested. The drag ACTUATION is DOM — and it cannot be verified
+in this repo's test harness, for two independent reasons:
+
+- **jsdom does no layout.** `getBoundingClientRect` is all-zero and `document.elementFromPoint` returns
+  `null`, so "the pointer is over element X, which sits at rect R" — the input the whole app drag runs
+  on — cannot be constructed in a jsdom test.
+- **The Browser pane never paints here** (project memory `browser-pane-tabs-never-paint`): screenshots
+  time out and pointer/rAF/observer callbacks do not fire, so a live drag cannot be driven there either.
+
+So build the app drag as a thin DOM adapter over testable logic: put the drag STATE MACHINE (idle →
+pending → dragging, threshold, `preview`/`commitPreview`/`cancelPreview`, Escape) behind an injected
+`resolveDrop(pointer) => Drop | null` seam and unit-test it with a FAKE resolver that returns known
+drops (no layout needed) — that verifies the store integration. The REAL `resolveDrop` (elementFromPoint
+→ nearest container handle → child rects → `dropTarget`) and the pointer-capture + iframe shield stay
+thin and are verifiable only in a real interactive browser. Do not claim E2 "done" until that real
+browser check has actually happened; label it browser-pending until then.
+
 ### Still to do in Phase E (sequenced)
 
-- **E2 — structural drag.** New headless `@vpb/interaction`: `dropTarget(pointer, siblingRects, tree) →
-  {parentId, index}` (before/after/into geometry), node-tested + mutation set. `apps/web`: pointer
-  capture + a transparent shield over the iframe during drag (the §4.1 stall), `preview(moveNodeCommand)`
-  live, `commitPreview()` on drop, `cancelPreview()` on Escape, a drop indicator in the overlay. Reuses
-  core `moveNode` (cycle guard + index adjustment) and state `moveNodeCommand`/`restoreNodePositionCommand`.
+- **E2 — app drag wiring (geometry done).** `apps/web`: pointer capture + a transparent shield over the
+  iframe during drag (the §4.1 stall), `preview(moveNodeCommand)` live, `commitPreview()` on drop,
+  `cancelPreview()` on Escape, a drop indicator in the overlay. Consumes `@vpb/interaction`'s `dropTarget`
+  and core `moveNode`/state `moveNodeCommand`. See the caveat above — build it behind an injected
+  `resolveDrop` seam so the store integration is testable, and verify the DOM half in a real browser.
 - **E3 — resize.** Overlay handles → `preview(setStylePropertyCommand)` width/height on the active
   breakpoint/state → commit on release.
 - **E4 — multi-select ops + batching.** `batchCommand` composite in `@vpb/state` (the answer to AUDIT

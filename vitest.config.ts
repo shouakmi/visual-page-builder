@@ -51,6 +51,14 @@ export default defineConfig({
         },
       },
       {
+        test: {
+          name: 'interaction',
+          root: './packages/interaction',
+          environment: 'node',
+          include: ['src/**/*.test.ts'],
+        },
+      },
+      {
         plugins: [react()],
         test: {
           name: 'renderer',

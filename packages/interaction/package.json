@@ -1,0 +1,21 @@
+{
+  "name": "@vpb/interaction",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The interaction brain: pointer geometry for drag, drop, and snap. Headless — no React, no DOM.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vpb/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

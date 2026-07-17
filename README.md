@@ -10,8 +10,10 @@ An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web
 > (D3), and `apps/web` wires the store → the compiler → the renderer → the frame into a live canvas
 > that opens on a real starter project (D4). Phase E adds interaction, starting with **selection (E1)**:
 > click an element to select it, shift/ctrl to multi-select, and a tracking overlay draws a box over
-> the selection. The canvas renders through **the same compiler the export will call**, so what you see
-> is what Phase I ships. See the [Roadmap](#roadmap).
+> the selection. Structural drag (E2) is underway — its decision layer, a headless `@vpb/interaction`
+> that computes where a drop lands, is done and tested; wiring it to pointer events in the app is the
+> remaining step. The canvas renders through **the same compiler the export will call**, so what you
+> see is what Phase I ships. See the [Roadmap](#roadmap).
 
 See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
 [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
@@ -64,6 +66,7 @@ packages/
     document/                         pages, project, asset library
   state/                @vpb/state  — the edit layer: commands, history, store. No React, no DOM.
     editorState.ts                    the document + where the user is in it
+  interaction/          @vpb/interaction — drag/drop/snap geometry. Headless: no React, no DOM (E2)
   renderer/             @vpb/renderer — the node tree as escaped React, in a sandboxed iframe (D2/D3)
   tokens/               @vpb/tokens — design tokens: palette, semantic scale, theme.css
   ui/                   @vpb/ui     — design system: theming, primitives, app shell
@@ -267,13 +270,14 @@ One runner, four projects, each with the environment it needs (`vitest.config.ts
 | ---------- | ----------- | ------------------------------------------------------- | --------------- |
 | `core`     | node        | The model: style, cascade, compiler, tree, document     | 527 tests       |
 | `state`    | node        | Commands, inverses, history, the store                  | 157 tests       |
+| `interaction` | node     | Drag geometry: where a drop lands, composed with `moveNode` | 12 tests     |
 | `renderer` | jsdom       | Escaped rendering, the sandboxed frame, the hit-test handle | 52 tests     |
 | `tokens`   | node        | Token contract, CSS/TS parity, colour distinction       | 48 tests        |
 | `ui`       | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard      | 34 tests        |
 | `web`      | jsdom       | Canvas wiring (D4), selection + overlay (E1), the `index.html` contract | 21 tests |
 
 ```bash
-pnpm test                        # everything (839 today)
+pnpm test                        # everything (851 today)
 pnpm vitest run --project core   # one project
 ```
 
@@ -308,8 +312,9 @@ pnpm mutate --filter cycle # one mutation by name
 Every phase is built this way; **121 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
 C, 12 for D1, 12 for D2 (the renderer: escaping, `isSafeUrl`, the `componentId -> React` map), 9 for D3
 (the sandboxed frame: the `sandbox` attribute, incremental reconciliation), 8 for D4 (the app wiring:
-`present` vs `committed`, the active page, the per-page node filter, device sizing), and 7 for E1 (the
-hit-test handle, the click→node walk, multi-select, the overlay).
+`present` vs `committed`, the active page, the per-page node filter, device sizing), 7 for E1 (the
+hit-test handle, the click→node walk, multi-select, the overlay), and 4 for E2 (drag geometry: the
+axis, the before/after boundary, the index).
 
 Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
 their first run, which proves only that they were written against code that already passed them.
@@ -393,7 +398,7 @@ the code still compiles and the tests still pass — which is precisely why it i
 | **B3** | **Document — node tree + index, component registry, page/project. ✅**          |
 | **C**  | **Commands, inverse-command history, Zustand store — headless and testable. ✅** |
 | **D**  | **Renderer + style compiler + sandboxed canvas, wired into the app; the shared-compiler WYSIWYG invariant. ✅ Done.** |
-| E     | Interaction: overlay, structural drag, resize, multi-select, snap guides. **Selection (E1) ✅; drag next** |
+| E     | Interaction: overlay, structural drag, resize, multi-select, snap guides. **Selection (E1) ✅; drag geometry (E2) ✅, drag wiring next** |
 | F     | Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets  |
 | G     | HTML/CSS importer — the validator of the Phase B model                      |
 | H     | Style panel + component library                                             |
