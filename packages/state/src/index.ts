@@ -42,3 +42,29 @@ export {
   addClassCommand,
   removeClassCommand,
 } from './commands/propCommands.ts';
+
+/* History — inverse commands, coalescing, a cap, and context restore. */
+export {
+  EMPTY_HISTORY,
+  DEFAULT_HISTORY_LIMIT,
+  DEFAULT_COALESCE_WINDOW_MS,
+  createHistory,
+  record,
+  entryFor,
+  undo,
+  redo,
+  canUndo,
+  canRedo,
+  undoLabel,
+  redoLabel,
+} from './history.ts';
+export type { History, HistoryEntry, HistoryStep } from './history.ts';
+
+/* The store — vanilla Zustand. No React; Phase D binds it with useStore. */
+export { createEditorStore } from './store.ts';
+export type {
+  EditorStore,
+  EditorStoreState,
+  EditorStoreActions,
+  EditorStoreOptions,
+} from './store.ts';
