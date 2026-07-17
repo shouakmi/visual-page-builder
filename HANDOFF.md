@@ -10,26 +10,31 @@ the news.
 
 ## Where we are
 
-**Phase C is complete. Phase D is underway: the style compiler has landed; the renderer and canvas
-have not.**
+**Phase C and Phase D are both complete.** The style compiler (D1), the renderer (D2), the sandboxed
+canvas frame (D3), and the app wiring (D4) have all landed. The editor now has a face.
 
 | | |
 | --- | --- |
-| Last session | 2026-07-17 — Phase C, then Phase D's cascade fix + style compiler |
-| Git | branch **`phase-c`** @ `9268800`, eleven commits ahead of `main` @ `6da69ce`. **Not pushed, not merged.** |
-| Working tree | Clean |
-| `pnpm verify` | Green — 772 tests across 28 files |
-| `pnpm mutate` | Green — 85/85 caught (A 19, B2 9, B3 19, C 26, D1 12) |
+| Last session | 2026-07-17 — finished Phase D: renderer, sandboxed frame, and app wiring (D2–D4) |
+| Git | branch **`phase-c`**, **16 commits** ahead of `main` @ `6da69ce`; HEAD is the D4 mutation-set commit. **Not pushed, not merged.** Rename to `phase-d` or merge. |
+| Working tree | Clean (D4 work committed) |
+| `pnpm verify` | Green — **827 tests across 31 files**, build succeeds (re-run 2026-07-17) |
+| `pnpm mutate` | Green — **114/114 caught** (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8) |
 
-Done: **A**, **B1**, **B2**, **B3**, **C**, and **D1** (the style compiler).
+Done: **A**, **B1**, **B2**, **B3**, **C**, and all of **D** (D1 compiler, D2 renderer, D3 sandboxed
+frame, D4 app wiring — now with its own mutation set).
 
-Test counts by project: `core` 528, `state` 156, `tokens` 48, `ui` 34, `web` 6.
-
-> The branch is still named `phase-c` and now carries Phase D work. Rename or merge before it gets
+> Test counts by project: `core` 527, `state` 157, `renderer` 48, `tokens` 48, `ui` 34, `web` 13 = 827.
+>
+> The branch is still named `phase-c` and now carries all of Phase D. Rename or merge before it gets
 > confusing.
 
-**The editor is real and has no face.** Every edit, undo and redo works, the model compiles to real
-CSS, and all of it is driven only from tests. There is no renderer and no canvas.
+**The editor is real and now renders.** Every edit, undo and redo works, the model compiles to real
+CSS, and `apps/web` mounts a live canvas: `Canvas.tsx` reads `present` from the store, compiles the
+active page with `compileStyleSheet`, renders its tree through `@vpb/renderer`'s `RenderChildren`
+inside a `CanvasFrame` that cannot run page code, and sizes the frame to the active breakpoint so the
+real media queries fire. It opens on `starterProject.ts` — a real `Project` built through core's
+public API, exercising a shared class, a node-local override, `:hover`, and a mobile rule.
 
 ### Commits on `phase-c`
 
@@ -183,7 +188,7 @@ The phase's spec (AUDIT §8) is met. What remains is deliberate scope, not omiss
 - **`git core.autocrlf=true` on this machine.** Harmless so far — commits contain only real changes —
   but the mutation harness writes LF and every `git add` prints conversion warnings. Worth an
   `.gitattributes` if it ever bites.
-- **`phase-c` is unpushed and unmerged, and now carries Phase D work.** Eleven commits.
+- **`phase-c` is unpushed and unmerged, and now carries all of Phase D.** 16 commits ahead of `main`.
 - **B2's mutation set did not exist** until `1bc94c7`, despite the README claiming "B2 and B3 were
   both built this way". It was presumably lost with the two suites in the 2026-07-17 incident, and
   nothing noticed — **a missing mutation set fails silently by definition.** `b2-cascade.mjs` now
@@ -191,13 +196,17 @@ The phase's spec (AUDIT §8) is met. What remains is deliberate scope, not omiss
   surface. If you want the guarantee the README implies, the rest of B2 (breakpoint graph, targets,
   declarations, serialisation) still has no mutation coverage.
 
-Phase D is explicitly **not** to be started.
+These items are still deferred as noted; none of them blocks Phase E.
 
 ---
 
 ## Phase D — where it stands
 
-**Done — D1, the style compiler** (`packages/core/src/style/compile.ts`).
+**Complete — D1 through D4.** D1 (the style compiler), D2 (the renderer), D3 (the sandboxed canvas
+frame), and D4 (the app wiring) have all landed. The subsections below record the compiler's design
+first, then how D2–D4 came together.
+
+**D1, the style compiler** (`packages/core/src/style/compile.ts`).
 
 Before it could be written, Phase D found that the model **could not be exported**. `resolve.ts`
 claimed its precedence was "EXACTLY what a browser produces from source-ordered CSS"; it was not, on
@@ -224,22 +233,53 @@ The compiler's key decisions, so nobody "simplifies" them back:
   specificity ties. So the test asserts the resolver's sequence **is** the CSS's sequence. Plus the
   golden file AUDIT §8 asks for.
 
-### Still to do in Phase D
+### How D2–D4 landed
 
-1. **`@vpb/renderer`** — the `componentId -> React` map, and escaped rendering of the node tree.
-   AUDIT §4.5: the prototype interpolated props and text raw into an HTML string, so any quote broke
-   the markup and any `<script>` executed. Elements need `class="n-<id> <classes>"` —
-   `nodeClassName()` is exported for exactly this and is the renderer's half of the compiler's
-   contract.
-2. **The sandboxed iframe canvas.** §4.5: the prototype's iframe was created by `doc.write` from the
-   parent, making it **same-origin with full access to the editor's `localStorage`**, and carried no
-   `sandbox` attribute. §4.6: it was rebuilt by `doc.open/write/close` on every state change —
-   including every click, since `select()` mutated state — blowing away scroll, focus, form state,
-   and re-running all project JS. Needs incremental reconciliation, not `doc.write`.
-3. **Golden-file tests for rendered HTML**, to pair with the compiler's.
-4. **Wire it into `apps/web`** and add `@source` for any new package carrying Tailwind classes.
+1. **`@vpb/renderer` (D2)** — the `componentId -> React` map (`createBuiltinRenderers`) plus escaped
+   rendering of the node tree (`RenderChildren`), answering AUDIT §4.5: the prototype interpolated
+   props and text raw into an HTML string, so any quote broke the markup and any `<script>` executed.
+   Elements carry `class="n-<id> <classes>"` via the compiler's exported `classNameFor` /
+   `nodeClassName()` — the renderer's half of the compiler's contract.
+2. **The sandboxed iframe canvas (D3)** — `CanvasFrame`, a frame that cannot run page code, answering
+   §4.5 (the prototype's `doc.write` iframe was same-origin with full access to the editor's
+   `localStorage` and carried no `sandbox` attribute) and §4.6 (it was rebuilt by `doc.open/write/close`
+   on every state change, blowing away scroll, focus, and form state and re-running all project JS).
+   It reconciles incrementally rather than rewriting the document.
+3. **App wiring (D4)** — `apps/web/src/Canvas.tsx` binds the store with `useStore`, compiles the active
+   page with `compileStyleSheet`, renders its tree through `RenderChildren` inside `CanvasFrame`, and
+   sizes the frame to the active breakpoint so the real media queries fire against the same stylesheet
+   the export ships. It opens on `apps/web/src/starterProject.ts`, a real `Project` (shared class,
+   node-local override, `:hover`, mobile rule) rather than a mock.
 
-What it inherits, and must respect:
+Mutation coverage already exists for D2 and D3 (verified 2026-07-17, `pnpm mutate` green):
+
+- **D2 — canvas renderer, 12 mutations** (`tools/mutations/`). Includes the escaping and URL invariants:
+  *text rendered through `dangerouslySetInnerHTML`*, *`href`/*`image src` no longer checked with
+  `isSafeUrl`*, *node class dropped from the element class list*, *children never walked*, *renderer map
+  ignored in favour of the default*. All caught.
+- **D3 — sandboxed canvas, 9 mutations.** Includes *`allow-scripts` added alongside `allow-same-origin`*,
+  *`sandbox` attribute removed entirely*, *page rendered into the parent document instead of the frame*,
+  *a new style element created on every css change* (incremental reconciliation). All caught.
+
+- **D4 — app wiring, 8 mutations** (`tools/mutations/d4-wiring.mjs`, added 2026-07-17). Pins the
+  wiring itself, which every other package's suite passes right through: *reads `committed` instead of
+  `present`* (freezes live previews), *renders the first page instead of the active one*, *drops the
+  per-page node filter*, *never hands the compiled CSS to the frame*, *drops the page root class from
+  the frame body*, and three device-sizing breaks. Each is caught by exactly one test in
+  `apps/web/src/__tests__/Canvas.test.tsx` — the "caught by one" is deliberate: it proves each test is
+  load-bearing rather than incidentally red. To make this testable the `web` project moved to jsdom
+  (the canvas renders into an iframe); the bootstrap test opted back to node with a docblock.
+
+**Phase D is now fully closed** — every sub-phase has tests and a mutation set. Two smaller checks are
+not blockers but worth a look when Phase E opens the renderer again:
+
+- **Golden-file tests for rendered HTML** — the renderer project has 48 tests; confirm a golden file
+  pairs with the compiler's, per AUDIT §8, or add one.
+- **`@source` for `@vpb/renderer`** — verify it is covered in `apps/web/src/styles.css` if it ships any
+  Tailwind classes (see the README's Tailwind note). The production build passed, which is suggestive
+  but not conclusive if the renderer emits no Tailwind classes of its own.
+
+What Phase D inherited, and had to respect:
 
 - **The store is the seam.** `createEditorStore` returns a vanilla `StoreApi<EditorStore>`; bind it
   with `useStore` from `zustand`. Do not move the store into React — the package's node Vitest

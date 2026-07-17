@@ -6,9 +6,14 @@ import { defineConfig } from 'vitest/config';
  *
  * Each package gets the environment it actually needs rather than paying for the
  * heaviest common denominator: `@vpb/core`, `@vpb/tokens` and `@vpb/state` are
- * pure logic, so they run in Node; `@vpb/ui` renders React and needs jsdom;
- * `@vpb/web` only asserts on static assets today. Running the core or token
- * suites in jsdom would cost a DOM per file to test string manipulation.
+ * pure logic, so they run in Node; `@vpb/ui`, `@vpb/renderer` and now `@vpb/web`
+ * render React and need jsdom. Running the core or token suites in jsdom would
+ * cost a DOM per file to test string manipulation.
+ *
+ * `@vpb/web` used to be node-only — it asserted on `index.html` as a string. Phase
+ * D wired a live canvas into the app (`Canvas.tsx`), whose test renders it into an
+ * iframe, so the project moved to jsdom. The bootstrap test still reads the HTML
+ * file and is unaffected by the DOM around it.
  *
  * `state` running in **node** is a gate, not a preference: Phase C is required to
  * be headless. If a store or command ever reaches for `window`, this project is
@@ -66,11 +71,13 @@ export default defineConfig({
         },
       },
       {
+        plugins: [react()],
         test: {
           name: 'web',
           root: './apps/web',
-          environment: 'node',
-          include: ['src/**/*.test.ts'],
+          environment: 'jsdom',
+          setupFiles: ['./src/test/setup.ts'],
+          include: ['src/**/*.test.{ts,tsx}'],
         },
       },
     ],

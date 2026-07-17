@@ -2,13 +2,14 @@
 
 An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web from one codebase.
 
-> **Status: Phase C complete; Phase D underway — the style compiler landed.** The workspace installs,
-> typechecks, lints, tests, builds, and themes; `@vpb/core` carries the style/cascade/document model
-> (B1–B3) **and the style compiler** (D1), and `@vpb/state` carries commands, undo/redo, and a
-> headless store (C). The model now compiles to real CSS, and the compiler is proven to rank rules
-> the way the resolver does. There is still **nothing to look at**: the renderer and the sandboxed
-> canvas are the rest of Phase D. See the [Roadmap](#roadmap). Panels in the running app name the
-> phase that fills them rather than pretending to work.
+> **Status: Phase C complete; Phase D complete — there is now something to look at.** The workspace
+> installs, typechecks, lints, tests, builds, and themes; `@vpb/core` carries the style/cascade/document
+> model (B1–B3) **and the style compiler** (D1), and `@vpb/state` carries commands, undo/redo, and a
+> headless store (C). Phase D closes the loop end to end: `@vpb/renderer` turns the node tree into
+> escaped React (D2), a sandboxed iframe frame renders it without letting page code touch the editor
+> (D3), and `apps/web` wires the store → the compiler → the renderer → the frame into a live canvas
+> that opens on a real starter project (D4). The canvas renders through **the same compiler the export
+> will call**, so what you see is what Phase I ships. See the [Roadmap](#roadmap).
 
 See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
 [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
@@ -49,6 +50,8 @@ pnpm dev          # http://localhost:5173
 ```
 apps/
   web/                  @vpb/web    — the application (also Electron's renderer, Phase J)
+    src/Canvas.tsx                    D4: store -> compiler -> renderer -> sandboxed frame
+    src/starterProject.ts             the real Project the editor opens with (not a mock)
 packages/
   core/                 @vpb/core   — the domain model. Framework-free, no DOM.
     identity/                         branded ids + injectable factory
@@ -58,6 +61,7 @@ packages/
     document/                         pages, project, asset library
   state/                @vpb/state  — the edit layer: commands, history, store. No React, no DOM.
     editorState.ts                    the document + where the user is in it
+  renderer/             @vpb/renderer — the node tree as escaped React, in a sandboxed iframe (D2/D3)
   tokens/               @vpb/tokens — design tokens: palette, semantic scale, theme.css
   ui/                   @vpb/ui     — design system: theming, primitives, app shell
 tools/                  repo scripts
@@ -67,7 +71,7 @@ tools/                  repo scripts
   clean.mjs                           remove build output
 ```
 
-Packages arriving later, per the roadmap: `renderer`, `storage`, `export`, `importer`, `plugins`.
+Packages arriving later, per the roadmap: `storage`, `export`, `importer`, `plugins`.
 
 **`@vpb/core` imports nothing from React, the DOM, or a bundler**, and it never will. The domain
 model has to run in three places the browser is not: Node tests, the Electron main process, and
@@ -256,18 +260,23 @@ package containing Tailwind classes must be added here.**
 
 One runner, four projects, each with the environment it needs (`vitest.config.ts`):
 
-| Project  | Environment | Covers                                             | Status          |
-| -------- | ----------- | -------------------------------------------------- | --------------- |
-| `core`   | node        | The model: style, cascade, compiler, tree, document | 528 tests       |
-| `state`  | node        | Commands, inverses, history, the store             | 156 tests       |
-| `tokens` | node        | Token contract, CSS/TS parity, colour distinction   | 48 tests        |
-| `ui`     | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard  | 34 tests        |
-| `web`    | node        | The `index.html` anti-FOUC bootstrap contract       | 6 tests         |
+| Project    | Environment | Covers                                                  | Status          |
+| ---------- | ----------- | ------------------------------------------------------- | --------------- |
+| `core`     | node        | The model: style, cascade, compiler, tree, document     | 527 tests       |
+| `state`    | node        | Commands, inverses, history, the store                  | 157 tests       |
+| `renderer` | jsdom       | Escaped rendering of the node tree, the sandboxed frame | 48 tests        |
+| `tokens`   | node        | Token contract, CSS/TS parity, colour distinction       | 48 tests        |
+| `ui`       | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard      | 34 tests        |
+| `web`      | jsdom       | Canvas wiring (D4) + the `index.html` anti-FOUC contract | 13 tests        |
 
 ```bash
-pnpm test                        # everything (772 today)
+pnpm test                        # everything (827 today)
 pnpm vitest run --project core   # one project
 ```
+
+> The `web` project runs in jsdom because the canvas test renders into an iframe.
+> The `index.html` bootstrap test opts back to node with a `// @vitest-environment
+> node` docblock — it reads the HTML off disk and wants no DOM.
 
 **Testing philosophy.** Tests assert behaviour through public surfaces, never internals. The theme
 suite drives a real `ThemeToggle` with real clicks and keystrokes and asserts on accessible names and
@@ -293,8 +302,10 @@ pnpm mutate --list         # show what would run, change nothing
 pnpm mutate --filter cycle # one mutation by name
 ```
 
-Every phase is built this way; **85 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for C,
-12 for D1.
+Every phase is built this way; **114 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
+C, 12 for D1, 12 for D2 (the renderer: escaping, `isSafeUrl`, the `componentId -> React` map), 9 for D3
+(the sandboxed frame: the `sandbox` attribute, incremental reconciliation), and 8 for D4 (the app
+wiring: `present` vs `committed`, the active page, the per-page node filter, device sizing).
 
 Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
 their first run, which proves only that they were written against code that already passed them.
@@ -377,7 +388,7 @@ the code still compiles and the tests still pass — which is precisely why it i
 | **B2** | **Cascade engine — breakpoints, targets, rules, stylesheet, resolver. ✅**      |
 | **B3** | **Document — node tree + index, component registry, page/project. ✅**          |
 | **C**  | **Commands, inverse-command history, Zustand store — headless and testable. ✅** |
-| D      | Renderer + style compiler; the shared-compiler WYSIWYG invariant. **Compiler ✅, renderer next** |
+| **D**  | **Renderer + style compiler + sandboxed canvas, wired into the app; the shared-compiler WYSIWYG invariant. ✅ Done.** |
 | E     | Interaction: overlay, structural drag, resize, multi-select, snap guides    |
 | F     | Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets  |
 | G     | HTML/CSS importer — the validator of the Phase B model                      |
