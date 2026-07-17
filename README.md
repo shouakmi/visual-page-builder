@@ -2,10 +2,12 @@
 
 An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web from one codebase.
 
-> **Status: Phase B complete — the domain model.** The workspace installs, typechecks, lints, tests,
-> builds, and themes, and `@vpb/core` carries the full style/cascade/document model (B1–B3). There is
-> no editor yet — no store, no renderer, no canvas; Phase C is next. See the [Roadmap](#roadmap).
-> Panels in the running app name the phase that fills them rather than pretending to work.
+> **Status: Phase C complete — the model and the edit layer.** The workspace installs, typechecks,
+> lints, tests, builds, and themes; `@vpb/core` carries the full style/cascade/document model (B1–B3),
+> and `@vpb/state` carries commands, undo/redo, and a headless store (C). There is still **nothing to
+> look at** — no renderer and no canvas, which is Phase D. The editor is real but currently drivable
+> only from a test. See the [Roadmap](#roadmap). Panels in the running app name the phase that fills
+> them rather than pretending to work.
 
 See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
 [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
@@ -179,6 +181,38 @@ Props are a small discriminated union rather than `Record<string, any>`, for the
 style model is not a string: an image's `src` is an `AssetId`, not a lookalike string, so "which
 nodes use this asset?" — asset deletion, find-usages, export bundling — is answerable at all.
 
+### History is inverse commands, not snapshots or patches
+
+AUDIT §4.3 found history unusable for four separate reasons, and each has a named answer in
+`@vpb/state`:
+
+| The prototype | Here |
+| ------------- | ---- |
+| Each entry a full deep `EditorState`, uncapped | An entry holds two **commands** and a context. Plus a 100 cap |
+| `commit` on every character typed | `coalesceKey` merges a run of edits to one target inside 500ms |
+| Selection committed to history, so undo undid **clicks** | Context is **recorded** by an entry, never *is* one |
+| No transient state, so a drag in flight was history | The store's `preview`/`commitPreview` pair |
+
+A command produces the next state *and* the command that puts it back, both inside `apply` — because
+an inverse needs what exists only before the edit, and that is gone by the time Ctrl+Z is pressed.
+
+**Why not immer patches**, which §8's one-line summary asks for: `produce` with `enableMapSet`
+shallow-copies a Map on write exactly as `new Map(tree.nodes)` does, so it removes no copy; the
+values were already shared by reference, so the structural sharing already existed; and immer emits
+fine-grained patches only by *mutating a draft*, which every pure core mutator refuses to do —
+wrapping them yields one coarse `replace /pages/0/tree` carrying a whole new tree, a snapshot in a
+patch's clothing. §4.3 itself asks for "immer patches **/ inverse commands**". An inverse is smaller
+anyway: undoing an insert stores one `NodeId`.
+
+Two rules fall out of this and are enforced by tests:
+
+- **Nothing mints an id inside `apply`.** Redo is the *original command re-run*, which only
+  reproduces the same document if commands are deterministic. `insertNodeCommand` therefore takes a
+  pre-minted node, and `planDuplicateNode` computes the whole copy up front.
+- **Only absolute commands may coalesce.** A merged entry redoes by running the *last* command
+  against the *pre-first* state, which lands correctly precisely because these commands assign
+  rather than adjust.
+
 ### Tokens are enforced, not documented
 
 `semantic.ts` (TypeScript) and `theme.css` (CSS custom properties) are two representations of one
@@ -213,12 +247,13 @@ One runner, four projects, each with the environment it needs (`vitest.config.ts
 | Project  | Environment | Covers                                             | Status          |
 | -------- | ----------- | -------------------------------------------------- | --------------- |
 | `core`   | node        | The domain model: style, cascade, tree, document    | 488 tests       |
+| `state`  | node        | Commands, inverses, history, the store             | 156 tests       |
 | `tokens` | node        | Token contract, CSS/TS parity, colour distinction   | 48 tests        |
 | `ui`     | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard  | 34 tests        |
 | `web`    | node        | The `index.html` anti-FOUC bootstrap contract       | 6 tests         |
 
 ```bash
-pnpm test                        # everything (576 today)
+pnpm test                        # everything (732 today)
 pnpm vitest run --project core   # one project
 ```
 
@@ -246,7 +281,8 @@ pnpm mutate --list         # show what would run, change nothing
 pnpm mutate --filter cycle # one mutation by name
 ```
 
-B2 and B3 were both built this way; B3's 19 mutations and Phase A's 19 are all caught — 38 in total.
+Every phase since B2 was built this way; **64 mutations are all caught** — 19 for Phase A, 19 for B3,
+26 for C.
 
 Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
 their first run, which proves only that they were written against code that already passed them.
@@ -256,6 +292,14 @@ click handler back to the caller — it *reports* it — so `await user.click(..
 while the handler exploded, and the test's assertions (the preference still applied) held either way
 because `setPreferenceState` runs before the write. The test now asserts on errors escaping to
 `window`, and catches it. **A test written after the code is a hypothesis until a mutation falsifies it.**
+
+Phase C's set repeated the lesson on its first run: 3 of 23 survived, and **each survivor was a test
+that looked like it tested something**. One asserted an undo restored the selection — but it undid a
+*delete*, whose inverse selects the node it restores anyway, so the assertion held with the restore
+deleted. One asserted a drag applied each preview to the committed state — but the previewed command
+*assigns*, so stacking it on the previous preview reached the same value. One targeted a parameter
+nothing ever passed. All three passed against correct code and would have kept passing against broken
+code.
 
 The harness checks the baseline
 is green before it starts (a red baseline would score every mutation "caught" by a failure it did not
@@ -320,7 +364,7 @@ the code still compiles and the tests still pass — which is precisely why it i
 | **B1** | **Style vocabulary — identity, typed values, property catalog, CSS output. ✅** |
 | **B2** | **Cascade engine — breakpoints, targets, rules, stylesheet, resolver. ✅**      |
 | **B3** | **Document — node tree + index, component registry, page/project. ✅**          |
-| C      | Commands, patch-based history, Zustand store — headless and testable            |
+| **C**  | **Commands, inverse-command history, Zustand store — headless and testable. ✅** |
 | D     | Renderer + style compiler; the shared-compiler WYSIWYG invariant            |
 | E     | Interaction: overlay, structural drag, resize, multi-select, snap guides    |
 | F     | Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets  |

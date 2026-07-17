@@ -10,28 +10,50 @@ the news.
 
 ## Where we are
 
-**Phase B is complete. Phase C is in progress on branch `phase-c`.**
+**Phase C is functionally complete on branch `phase-c`. Phase D is next and must not be started
+without a decision to start it.**
 
 | | |
 | --- | --- |
-| Last session | 2026-07-17 — Phase C: commands and the edit layer |
-| Git | branch **`phase-c`** @ `6069e2b`, three commits ahead of `main` @ `6da69ce`. **Not pushed, not merged.** |
+| Last session | 2026-07-17 — Phase C: the edit layer, end to end |
+| Git | branch **`phase-c`** @ `06df95d`, seven commits ahead of `main` @ `6da69ce`. **Not pushed, not merged.** |
 | Working tree | Clean |
-| `pnpm verify` | Green — 638 tests across 23 files |
-| `pnpm mutate` | Green — 38/38 caught (**no Phase C set yet — see Remaining**) |
+| `pnpm verify` | Green — 732 tests across 27 files |
+| `pnpm mutate` | Green — 64/64 caught (A 19, B3 19, C 26) |
 
 Done: **A** (foundation, tokens, theming), **B1** (style vocabulary), **B2** (cascade engine),
-**B3** (document model). **C** is partially built; **D** onward not started.
+**B3** (document model), **C** (commands, history, store). **D** onward not started.
 
-Test counts by project: `core` 488, `state` 62, `tokens` 48, `ui` 34, `web` 6.
+Test counts by project: `core` 488, `state` 156, `tokens` 48, `ui` 34, `web` 6.
+
+**The editor is real and has no face.** Every edit, undo, and redo works and is driven only from
+tests; there is no renderer and no canvas. That is Phase D, and it is deliberately not begun.
 
 ### Commits on `phase-c`
 
 | Commit | What |
 | ------ | ---- |
-| `6e24caa` | Restores the `@vpb/tokens` and `@vpb/ui` suites lost in the incident (the previous session's work), plus `HANDOFF.md` and README corrections |
-| `aa7f3bd` | Scaffolds `@vpb/state` and the `EditorState`/`EditorContext` model |
-| `6069e2b` | The `Command` contract, the invoker, and structural node commands |
+| `6e24caa` | Restores the `@vpb/tokens` and `@vpb/ui` suites lost in the incident (previous session's work), plus `HANDOFF.md` and README corrections |
+| `aa7f3bd` | Scaffolds `@vpb/state`, the `EditorState`/`EditorContext` model |
+| `6069e2b` | The `Command` contract, the invoker, structural node commands |
+| `3bf1930` | Corrects the false immer claim in `tree.ts`/`stylesheet.ts` |
+| `5f0733f` | Style, prop, rename and class commands with coalesce keys |
+| `318b8a8` | Inverse-command history and the headless Zustand store |
+| `017cae7` | The Phase C mutation set, and the 3 vacuous tests it found |
+| `06df95d` | `planDuplicateNode`, closing `tree.ts`'s promise |
+
+### What `@vpb/state` contains
+
+```
+editorState.ts     EditorState = { project, context }; selection/page/breakpoint helpers
+command.ts         Command, CommandOutcome, EditorEnvironment, applyCommand (the invoker)
+commands/
+  nodeCommands.ts  insert, insertSubtree, remove, move, restoreNodePosition, planDuplicateNode
+  styleCommands.ts setStyleProperty, unsetStyleProperty  (the coalescing ones)
+  propCommands.ts  setNodeProp, unsetNodeProp, renameNode, setNodeClasses, add/removeClass
+history.ts         HistoryEntry, record, undo, redo, coalescing, the cap
+store.ts           createEditorStore — vanilla Zustand: execute/preview/commitPreview/undo/redo
+```
 
 ### The one finding worth carrying forward
 
@@ -121,33 +143,62 @@ runs in **node**, making "headless" a build gate rather than a promise.
 
 ---
 
-## Remaining in Phase C
+## What is left in Phase C
 
-Built: `EditorState`/`EditorContext`, the `Command` contract, the invoker, and structural node
-commands (insert, remove, move, restore-position, insert-subtree) with inverses.
+The phase's spec (AUDIT §8) is met. What remains is deliberate scope, not omission:
 
-Still to do, in order:
+1. **Page commands.** `addPage`/`removePage`/`renamePage`/`movePage` exist in core but have no
+   commands, so page management is not undoable. Left out because `removePage` also GCs node scopes
+   and **the context must move off a deleted page** — `activePage` throws by design if it does not.
+   That interacts with `EditorContext` in a way worth designing rather than bolting on. Nothing else
+   in C depends on it.
+2. **Asset commands.** Same story; Phase F owns assets and will want them.
+3. **`valuesEqual` in `@vpb/core`** — see Technical debt.
+4. **Multi-node commands.** Every command targets one node. Phase E's multi-select will want
+   "delete/move all selected" as ONE history entry, which needs either a composite command or a
+   transaction. `EditorContext.selection` is already a list, so the model is ready; the batching is
+   not designed. AUDIT §7.3 lists "no transaction/batching" among the defects, so this is the one
+   clause of that sentence not yet answered.
 
-1. **Style and prop commands** — `setStyleProperty`/`unsetStyleProperty`, `setNodeProp`, rename,
-   add/remove class. These are the ones that need `coalesceKey`.
-   *Known wrinkle:* core's `setProperty` takes an `IdFactory` to mint a `StyleRuleId` when the rule
-   does not exist. Per the mint-at-construction rule the command must carry a **pre-minted rule id**
-   rather than take a factory into `apply`. Note the principled distinction: a `StyleRuleId` is an
-   internal surrogate addressed only via the `(scope, target)` index, where a `NodeId` is referenced
-   from outside (selection, style scopes, props) — which is why node ids are the strict case.
-2. **`DuplicateNode`** — core's `duplicateNode` mints ids *internally* at apply time and returns an
-   `idMap` for the caller's style-rule copy (`tree.ts:456` says so explicitly). To stay redo-stable
-   it must be **planned at construction**: compute the duplicated subtree + rule copies up front, and
-   let `apply` merely insert them.
-3. **History** — undo/redo stacks, coalescing by `coalesceKey`, a bounded cap, and context restore.
-4. **The vanilla Zustand store** — transient vs committed separation (AUDIT §4.3 requires it: a
-   slider drag must not write an entry per frame).
-5. **`tools/mutations/c-*.mjs`** — and every mutation caught. **A phase without a mutation set is
-   unproven**, and Phase A proved that suites written after the code pass vacuously. Must include: a
-   naive move inverse (`moveNodeCommand(id, oldParent, oldIndex)`), a removed `applyCommand` identity
-   backstop, and a delete that drops style rules without restoring them.
+---
+
+## Technical debt, honestly
+
+- **`StyleValue` has no structural equality, so a no-op style edit takes a history entry.**
+  `declarationsEqual` compares values by REFERENCE (`b[property] !== value`), so a fresh `px(100)`
+  never equals a stored `px(100)`. Setting a property to the value it already has therefore records
+  an entry whose undo is invisible — and an invisible Ctrl+Z gets pressed twice, costing a real edit.
+  Coalescing hides the realistic case (a jittering slider is one entry). **The fix is `valuesEqual`
+  in `@vpb/core/style/values.ts`**, which is conspicuously missing next to `colorsEqual`,
+  `targetsEqual`, `scopesEqual` and `propsEqual`. It was not added this session because that is B1
+  territory and needs its own mutation coverage. The gap is pinned by a test in
+  `styleCommands.test.ts` that asserts today's behaviour *and the reason for it* — change that test
+  when the function lands. Consider also whether `declarationsEqual`'s reference comparison is
+  intentional or a latent bug of its own.
+- **`git core.autocrlf=true` on this machine.** Harmless so far — commits contain only real changes —
+  but the mutation harness writes LF and every `git add` prints conversion warnings. Worth an
+  `.gitattributes` if it ever bites.
+- **`phase-c` is unpushed and unmerged.** Seven commits.
 
 Phase D is explicitly **not** to be started.
+
+---
+
+## Next: Phase D — renderer + style compiler
+
+**Do not start it without being asked.** What Phase C leaves it, and what it must respect:
+
+- **The store is the seam.** `createEditorStore` returns a vanilla `StoreApi<EditorStore>`; bind it
+  with `useStore` from `zustand`. Do not move the store into React — the package's node Vitest
+  project is what keeps it honest, and Electron's main process gets `@vpb/core` only.
+- **`present` is what you render**, not `committed`. The difference is the live drag.
+- **Definitions carry no `render` function** — core is framework-free, so Phase D owns the
+  `componentId -> React` map per host (README, "A component is data").
+- **The WYSIWYG invariant is the point of D**: the editor and the exporter share one compiler, and
+  the cascade model already agrees with the browser by construction (README, "Cascade precedence").
+  Golden-file tests enforce it (AUDIT §8).
+- Phase D's emitter needs no `@layer`, no `!important`, no specificity hacks. If it seems to, the
+  model is being fought rather than used.
 
 ---
 
@@ -156,9 +207,8 @@ Phase D is explicitly **not** to be started.
 - **`AUDIT.md` is the rationale for the roadmap ordering.** Read it before arguing with the order —
   notably why the importer (G) precedes the component library (H).
 - **`AUDIT.md` §8's Phase C line is the real spec** and neither the README nor this file referenced
-  it until now: *"`Command` interface + invoker; immer-patch history with coalescing and
+  it until this session: *"`Command` interface + invoker; immer-patch history with coalescing and
   transient/committed separation; Zustand store as decided in Phase 1; headless, testable, no
-  React."* Everything but the immer clause stands (see above).
+  React."* Everything but the immer clause is implemented; that clause is answered above.
 - **The archived pre-move `dist/`** (outside the repo) is no longer load-bearing now that both lost
   suites are rewritten and the recovered sources are committed. Safe to drop after the next release.
-- **`phase-c` is unpushed.** Nothing is on `origin` past `6da69ce`.
