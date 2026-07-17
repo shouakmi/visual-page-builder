@@ -197,6 +197,10 @@ export {
 } from './style/stylesheet.ts';
 export type { StyleSheet } from './style/stylesheet.ts';
 
+/* Style — the compiler. ONE of these, shared by the canvas (D) and the exporter (I). */
+export { compileStyleSheet, ruleSelector, nodeClassName } from './style/compile.ts';
+export type { CompileOptions } from './style/compile.ts';
+
 /* Style — cascade resolution */
 export {
   resolveStyle,
