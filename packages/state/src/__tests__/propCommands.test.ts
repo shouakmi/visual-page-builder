@@ -227,13 +227,9 @@ describe('class commands', () => {
   });
 
   /**
-   * THE BUG THIS INVERSE EXISTS TO AVOID.
-   *
-   * `resolve.ts` builds an element's scopes as `classes.map(classScope)`, weakest
-   * first — so class ORDER is cascade order, and `.a .b` is a different element
-   * from `.b .a`. Undoing "remove .alpha" by appending it would hand it back at
-   * the STRONGEST position, and a property alpha used to lose it would now win.
-   * The layer panel would look right and the page would render differently.
+   * The class list is ordered and the user sees it as chips, so an undo that
+   * appends rather than restores has not restored what was there — and the
+   * exported `class="..."` attribute would differ too.
    */
   it('restores a removed class to its original POSITION, not the end', () => {
     const { state, node } = editorWith(BOX_COMPONENT_ID);
@@ -246,18 +242,22 @@ describe('class commands', () => {
     expect(nodeIn(undone, node)?.classes).toEqual([a, b, c]);
   });
 
-  it('undoing a class removal restores which class actually wins', () => {
-    // The rendering consequence of the ordering, asserted through the resolver
-    // rather than by eyeballing the array.
+  /**
+   * The element's class order does NOT decide the winner — `sheet.classOrder`
+   * does, exactly as a browser ranks by the stylesheet and ignores the `class`
+   * attribute. Asserted through the resolver rather than by eyeballing the array,
+   * and asserted for BOTH orders, because a per-element ranking is the thing the
+   * emitter could never reproduce.
+   */
+  it('the class list order does not change which class wins', () => {
     const { state, node, ids } = editorWith(BOX_COMPONENT_ID);
     const base = target(BASE_BREAKPOINT_ID);
 
-    // .alpha and .beta both set width; .beta is later, so .beta wins.
+    // .alpha styled first, then .beta -> the SHEET ranks .beta stronger.
     let styles = setProperty(state.project.styles, classScope(a), base, 'width', px(10), ids);
     styles = setProperty(styles, classScope(b), base, 'width', px(20), ids);
     const styled: EditorState = { ...state, project: { ...state.project, styles } };
 
-    const { state: withAll } = run(styled, setNodeClassesCommand(node, [a, b]));
     const widthOf = (s: EditorState, classes: readonly ClassName[]) =>
       resolveProperty(
         s.project.styles,
@@ -267,14 +267,24 @@ describe('class commands', () => {
         s.project.breakpoints,
       )?.value;
 
-    expect(widthOf(withAll, [a, b])).toEqual(px(20));
+    const { state: forward } = run(styled, setNodeClassesCommand(node, [a, b]));
+    const { state: reversed } = run(forward, setNodeClassesCommand(node, [b, a]));
 
+    expect(widthOf(forward, [a, b])).toEqual(px(20));
+    expect(widthOf(reversed, [b, a])).toEqual(px(20));
+  });
+
+  it('undoing a class removal restores the list exactly', () => {
+    const { state, node, ids } = editorWith(BOX_COMPONENT_ID);
+    const base = target(BASE_BREAKPOINT_ID);
+    const styles = setProperty(state.project.styles, classScope(a), base, 'width', px(10), ids);
+    const styled: EditorState = { ...state, project: { ...state.project, styles } };
+
+    const { state: withAll } = run(styled, setNodeClassesCommand(node, [a, b]));
     const { state: removed, inverse } = run(withAll, removeClassCommand(node, a));
     const { state: undone } = run(removed, inverse);
 
-    const classes = nodeIn(undone, node)?.classes ?? [];
-    expect(classes).toEqual([a, b]);
-    expect(widthOf(undone, classes)).toEqual(px(20));
+    expect(nodeIn(undone, node)?.classes).toEqual([a, b]);
   });
 
   it('leaves the class rules alone — removing from one node must not restyle others', () => {

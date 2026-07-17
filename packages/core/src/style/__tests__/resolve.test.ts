@@ -18,7 +18,7 @@ import {
   type StyleQuery,
 } from '../resolve.ts';
 import { classScope, nodeScope } from '../rule.ts';
-import { setProperty, type StyleSheet, EMPTY_STYLESHEET } from '../stylesheet.ts';
+import { setClassOrder, setProperty, type StyleSheet, EMPTY_STYLESHEET } from '../stylesheet.ts';
 import { target } from '../target.ts';
 import { px } from '../values.ts';
 
@@ -349,8 +349,8 @@ describe('pseudo-elements', () => {
 /* -------------------------------------------------------------------------- */
 
 describe('scope precedence', () => {
-  it('a later class overrides an earlier one', () => {
-    const primary = C('btn-primary');
+  /** `.btn` styled first, then `.btn-primary` — so the sheet ranks primary stronger. */
+  function twoClasses(primary: ClassName) {
     let sheet = setProperty(
       EMPTY_STYLESHEET,
       classScope(BTN),
@@ -367,10 +367,51 @@ describe('scope precedence', () => {
       px(12),
       ids,
     );
+    return sheet;
+  }
+
+  it('a class ranked later in the sheet overrides one ranked earlier', () => {
+    const primary = C('btn-primary');
+    const sheet = twoClasses(primary);
+
+    expect(sheet.classOrder).toEqual([BTN, primary]);
+    expect(padding(sheet, query([BTN, primary]), target(BASE_BREAKPOINT_ID))).toBe(12);
+  });
+
+  /**
+   * THE WYSIWYG INVARIANT, AT THE POINT IT WOULD BREAK.
+   *
+   * This assertion used to read the other way: the element's list decided, so
+   * reversing it reversed the winner. That is not something a stylesheet can
+   * reproduce — `class="btn primary"` and `class="primary btn"` are the same
+   * element to a browser, and one global source order cannot satisfy two elements
+   * that demand opposite winners. The model was more expressive than the platform
+   * it exports to, which is an unfixable export hole (AUDIT §4.7) rather than a
+   * feature. Precedence now comes from `sheet.classOrder`, and the order the
+   * classes are handed in is ignored — exactly as the attribute is.
+   */
+  it('ignores the order the classes are applied in — the attribute does not rank', () => {
+    const primary = C('btn-primary');
+    const sheet = twoClasses(primary);
 
     expect(padding(sheet, query([BTN, primary]), target(BASE_BREAKPOINT_ID))).toBe(12);
-    // Order is the user's, and reversing it reverses the winner.
+    expect(padding(sheet, query([primary, BTN]), target(BASE_BREAKPOINT_ID))).toBe(12);
+  });
+
+  it('follows the sheet when the ranking is changed', () => {
+    // The user's control over which class wins: reorder the sheet, not the element.
+    const primary = C('btn-primary');
+    const sheet = setClassOrder(twoClasses(primary), [primary, BTN]);
+
+    expect(padding(sheet, query([BTN, primary]), target(BASE_BREAKPOINT_ID))).toBe(40);
     expect(padding(sheet, query([primary, BTN]), target(BASE_BREAKPOINT_ID))).toBe(40);
+  });
+
+  it('a class the sheet has never styled contributes nothing and takes no rank', () => {
+    const primary = C('btn-primary');
+    const sheet = twoClasses(primary);
+
+    expect(padding(sheet, query([C('ghost'), BTN]), target(BASE_BREAKPOINT_ID))).toBe(40);
   });
 
   it('node-local overrides every class', () => {

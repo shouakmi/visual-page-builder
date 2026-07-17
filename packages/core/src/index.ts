@@ -190,6 +190,7 @@ export {
   setProperty,
   unsetProperty,
   setDeclarations,
+  setClassOrder,
   scopeKeys,
   orphanedRules,
   validateStyleSheet,

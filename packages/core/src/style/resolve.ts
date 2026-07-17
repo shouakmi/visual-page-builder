@@ -18,7 +18,7 @@ import type { StyleValue } from './values.ts';
  * Three axes compete. Strongest first:
  *
  *   1. STATE       default  <  hover / focus / ...
- *   2. SCOPE       class[0] < class[1] < ... < node-local
+ *   2. SCOPE       classOrder[0] < classOrder[1] < ... < node-local
  *   3. BREAKPOINT  base     < tablet < mobile-landscape < mobile
  *
  * Read as nested loops with the strongest axis OUTERMOST, merging as we go: the
@@ -51,11 +51,38 @@ import type { StyleValue } from './values.ts';
  *
  * A model that agrees with the platform by construction cannot drift from it.
  * That is the WYSIWYG invariant, established here rather than patched later.
+ *
+ * ───────────── WHY CLASS ORDER COMES FROM THE SHEET ─────────────
+ *
+ * An earlier version of this file took class precedence from the ELEMENT's list,
+ * documented as "order is the user's; later overrides earlier". It made the
+ * paragraph above untrue, and the emitter would have been the one to find out.
+ *
+ * In CSS, `class="btn primary"` and `class="primary btn"` are the same element.
+ * The attribute's order contributes nothing; the stylesheet's does. So per-element
+ * ordering can describe a document no stylesheet can reproduce: give two elements
+ * the same two classes in opposite orders and each demands a different winner,
+ * while one global source order can only satisfy one of them. The model would
+ * have been strictly more expressive than the platform it exports to — which
+ * sounds like a feature and is really an unfixable WYSIWYG hole, the same one
+ * AUDIT §4.7 calls the cardinal sin, arriving through the model instead of the
+ * exporter.
+ *
+ * So precedence lives in `sheet.classOrder`, and a node's `classes` is a SET of
+ * references whose order is presentational. An element that must disagree with
+ * the global ranking uses node-local rules, which outrank every class — the same
+ * answer a CSS author would give.
  */
 
 /** The style-relevant identity of an element. */
 export interface StyleQuery {
-  /** Applied classes, weakest first. Order is the user's; later overrides earlier. */
+  /**
+   * The classes applied to the element, in ANY order.
+   *
+   * Order here is not read: precedence comes from `sheet.classOrder`, exactly as
+   * a browser ignores the `class` attribute's order and obeys the stylesheet's.
+   * Duplicates are harmless.
+   */
   readonly classes: readonly ClassName[];
   /** `null` for a query not bound to a specific element (e.g. previewing a class). */
   readonly nodeId: NodeId | null;
@@ -72,10 +99,20 @@ export type ResolvedStyle = ReadonlyMap<StyleProperty, ResolvedProperty>;
 /**
  * The scopes contributing to a query, weakest first.
  *
+ * The element's classes are ranked by the SHEET's order, not the order they were
+ * handed in — see the note above. A class the sheet has never heard of has no
+ * rules and so contributes nothing; it is dropped rather than appended, because
+ * appending would give an unstyled class a rank and let it outrank a styled one
+ * the moment someone styled it.
+ *
  * Node-local last, so it outranks every class — within its state layer.
  */
-function scopesFor(query: StyleQuery): readonly StyleScope[] {
-  const scopes: StyleScope[] = query.classes.map(classScope);
+function scopesFor(sheet: StyleSheet, query: StyleQuery): readonly StyleScope[] {
+  const applied = new Set(query.classes);
+  const scopes: StyleScope[] = sheet.classOrder
+    .filter((name) => applied.has(name))
+    .map((name) => classScope(name));
+
   if (query.nodeId !== null) scopes.push(nodeScope(query.nodeId));
   return scopes;
 }
@@ -92,7 +129,7 @@ function contributingRules(
   target: StyleTarget,
   breakpoints: BreakpointSet,
 ): readonly StyleRule[] {
-  const scopes = scopesFor(query);
+  const scopes = scopesFor(sheet, query);
   const chain = cascadeChain(breakpoints, target.breakpoint);
   const rules: StyleRule[] = [];
 

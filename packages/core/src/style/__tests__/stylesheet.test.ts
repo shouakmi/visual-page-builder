@@ -21,6 +21,7 @@ import {
   ruleCount,
   rulesForScope,
   scopeKeys,
+  setClassOrder,
   setDeclarations,
   setProperty,
   unsetProperty,
@@ -312,7 +313,11 @@ describe('validateStyleSheet', () => {
       target: BASE,
       declarations: { paddingTop: px(1) },
     };
-    const broken: StyleSheet = { rules: new Map([[orphan.id, orphan]]), index: new Map() };
+    const broken: StyleSheet = {
+      rules: new Map([[orphan.id, orphan]]),
+      index: new Map(),
+      classOrder: [BTN],
+    };
     expect(validateStyleSheet(broken).join(' ')).toMatch(/not indexed/i);
   });
 
@@ -320,6 +325,7 @@ describe('validateStyleSheet', () => {
     const broken: StyleSheet = {
       rules: new Map(),
       index: new Map([['class:btn', new Map([['base|default|', unsafeId<StyleRuleId>('gone')]])]]),
+      classOrder: [BTN],
     };
     expect(validateStyleSheet(broken).join(' ')).toMatch(/missing rule/i);
   });
@@ -334,7 +340,130 @@ describe('validateStyleSheet', () => {
     const broken: StyleSheet = {
       rules: new Map([[rule.id, rule]]),
       index: new Map([['class:other', new Map([['base|default|', rule.id]])]]),
+      classOrder: [BTN],
     };
     expect(validateStyleSheet(broken).join(' ')).toMatch(/its scope is/i);
+  });
+
+  it('catches a styled class with no place in classOrder', () => {
+    // Invisible to `scopesFor`, so its rules would silently stop applying: the
+    // sheet looks right, `rules` holds them, and nothing renders.
+    const rule: StyleRule = {
+      id: unsafeId<StyleRuleId>('r1'),
+      scope: classScope(BTN),
+      target: BASE,
+      declarations: { paddingTop: px(1) },
+    };
+    const broken: StyleSheet = {
+      rules: new Map([[rule.id, rule]]),
+      index: new Map([['class:btn', new Map([['base|default|', rule.id]])]]),
+      classOrder: [],
+    };
+    expect(validateStyleSheet(broken).join(' ')).toMatch(/no place in classOrder/i);
+  });
+
+  it('catches a duplicate rank', () => {
+    expect(validateStyleSheet({ ...EMPTY_STYLESHEET, classOrder: [BTN, BTN] }).join(' ')).toMatch(
+      /duplicate/i,
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* classOrder — which class beats which                                        */
+/* -------------------------------------------------------------------------- */
+
+describe('classOrder', () => {
+  const PRIMARY = C('btn-primary');
+
+  it('ranks a newly styled class last, i.e. strongest', () => {
+    // What the author just did: they made a class and styled it, and expect that
+    // styling to take effect rather than lose to one made last week.
+    let sheet = setProperty(EMPTY_STYLESHEET, classScope(BTN), BASE, 'paddingTop', px(1), ids);
+    sheet = setProperty(sheet, classScope(PRIMARY), BASE, 'paddingTop', px(2), ids);
+
+    expect(sheet.classOrder).toEqual([BTN, PRIMARY]);
+  });
+
+  it('ranks a class once, however many rules it gets', () => {
+    let sheet = setProperty(EMPTY_STYLESHEET, classScope(BTN), BASE, 'paddingTop', px(1), ids);
+    sheet = setProperty(sheet, classScope(BTN), BASE, 'paddingBottom', px(2), ids);
+    sheet = setProperty(
+      sheet,
+      classScope(BTN),
+      target(MOBILE_BREAKPOINT_ID),
+      'paddingTop',
+      px(3),
+      ids,
+    );
+
+    expect(sheet.classOrder).toEqual([BTN]);
+  });
+
+  it('does not rank node scopes', () => {
+    const sheet = setProperty(EMPTY_STYLESHEET, nodeScope(NODE), BASE, 'paddingTop', px(1), ids);
+    expect(sheet.classOrder).toEqual([]);
+  });
+
+  /**
+   * THE TRAP THIS AVOIDS. If unsetting a class's last property dropped its rank,
+   * styling it again would append it at the strongest position — so a property it
+   * used to lose it would now win, because of an edit that only touched one value.
+   */
+  it('keeps a class ranked when its last rule is removed', () => {
+    let sheet = setProperty(EMPTY_STYLESHEET, classScope(BTN), BASE, 'paddingTop', px(1), ids);
+    sheet = setProperty(sheet, classScope(PRIMARY), BASE, 'paddingTop', px(2), ids);
+    expect(sheet.classOrder).toEqual([BTN, PRIMARY]);
+
+    sheet = unsetProperty(sheet, classScope(BTN), BASE, 'paddingTop');
+    expect(rulesForScope(sheet, classScope(BTN))).toEqual([]);
+    expect(sheet.classOrder).toEqual([BTN, PRIMARY]);
+
+    // Restyling it does not promote it past .btn-primary.
+    sheet = setProperty(sheet, classScope(BTN), BASE, 'paddingTop', px(9), ids);
+    expect(sheet.classOrder).toEqual([BTN, PRIMARY]);
+  });
+
+  it('drops the rank on removeScope, the deliberate delete', () => {
+    let sheet = setProperty(EMPTY_STYLESHEET, classScope(BTN), BASE, 'paddingTop', px(1), ids);
+    sheet = setProperty(sheet, classScope(PRIMARY), BASE, 'paddingTop', px(2), ids);
+
+    sheet = removeScope(sheet, classScope(BTN));
+    expect(sheet.classOrder).toEqual([PRIMARY]);
+    expect(validateStyleSheet(sheet)).toEqual([]);
+  });
+});
+
+describe('setClassOrder', () => {
+  const PRIMARY = C('btn-primary');
+
+  function twoClasses() {
+    let sheet = setProperty(EMPTY_STYLESHEET, classScope(BTN), BASE, 'paddingTop', px(1), ids);
+    sheet = setProperty(sheet, classScope(PRIMARY), BASE, 'paddingTop', px(2), ids);
+    return sheet;
+  }
+
+  it('reorders precedence', () => {
+    const sheet = setClassOrder(twoClasses(), [PRIMARY, BTN]);
+    expect(sheet.classOrder).toEqual([PRIMARY, BTN]);
+    expect(validateStyleSheet(sheet)).toEqual([]);
+  });
+
+  it('ignores names the sheet has never styled, so a typo cannot create one', () => {
+    const sheet = setClassOrder(twoClasses(), [C('ghost'), PRIMARY, BTN]);
+    expect(sheet.classOrder).toEqual([PRIMARY, BTN]);
+  });
+
+  it('keeps omitted classes rather than dropping their rank', () => {
+    // A partial reorder must not silently unrank a class and take its rules
+    // out of the cascade.
+    const sheet = setClassOrder(twoClasses(), [PRIMARY]);
+    expect(sheet.classOrder).toEqual([PRIMARY, BTN]);
+    expect(validateStyleSheet(sheet)).toEqual([]);
+  });
+
+  it('ignores a duplicate rather than ranking a class twice', () => {
+    const sheet = setClassOrder(twoClasses(), [PRIMARY, PRIMARY, BTN]);
+    expect(sheet.classOrder).toEqual([PRIMARY, BTN]);
   });
 });

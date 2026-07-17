@@ -146,17 +146,16 @@ export function renameNodeCommand(id: NodeId, name: string | undefined): Command
 /**
  * Set a node's class list outright.
  *
- * Exists because CLASS ORDER IS CASCADE ORDER, and that makes it the only honest
- * inverse for the two commands below. `resolve.ts` builds an element's scopes as
- * `query.classes.map(classScope)` — "weakest first, later overrides earlier" —
- * so `.a .b` and `.b .a` are different elements as far as the resolver is
- * concerned.
+ * Class order here is PRESENTATIONAL, not cascade order — precedence lives in
+ * `sheet.classOrder`, because CSS ranks classes by the stylesheet's order and
+ * ignores the element's attribute entirely (see `resolve.ts`). So restoring the
+ * exact list is not about which rule wins.
  *
- * The consequence is easy to miss: undoing "remove `.a`" by *appending* `.a`
- * gives it back at the strongest position instead of its own, so a property `.a`
- * used to lose is now a property `.a` wins. The undo would look right in the
- * layer panel and silently change what the page renders. Capturing the whole
- * array sidesteps that entirely.
+ * It is still the only honest inverse, for a smaller reason: `classes` is an
+ * ordered list that the user sees as chips and that round-trips to
+ * `class="a b"`. Undoing "remove `.a`" by *appending* `.a` would put it back in
+ * the wrong chip position and change the exported attribute — an undo that does
+ * not restore what was there. Capturing the array sidesteps it.
  */
 export function setNodeClassesCommand(id: NodeId, classes: readonly ClassName[]): Command {
   return {
@@ -223,8 +222,7 @@ export function addClassCommand(id: NodeId, name: ClassName): Command {
  * Remove a class reference from a node.
  *
  * Inverts through `setNodeClassesCommand` rather than `addClassCommand` so the
- * class returns to its own position in the list. See that command for why the
- * difference is a rendering bug and not a cosmetic one.
+ * class returns to its own position in the list rather than the end.
  */
 export function removeClassCommand(id: NodeId, name: ClassName): Command {
   return {

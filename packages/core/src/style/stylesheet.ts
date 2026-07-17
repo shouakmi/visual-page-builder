@@ -1,5 +1,5 @@
 import type { IdFactory } from '../identity/idFactory.ts';
-import type { StyleRuleId } from '../identity/ids.ts';
+import type { ClassName, StyleRuleId } from '../identity/ids.ts';
 import type { BreakpointSet } from './breakpoints.ts';
 import { getBreakpoint } from './breakpoints.ts';
 import {
@@ -47,9 +47,36 @@ import type { StyleValue } from './values.ts';
 export interface StyleSheet {
   readonly rules: ReadonlyMap<StyleRuleId, StyleRule>;
   readonly index: ReadonlyMap<string, ReadonlyMap<string, StyleRuleId>>;
+  /**
+   * WHICH CLASS BEATS WHICH — weakest first. Project-wide, not per element.
+   *
+   * This is the one place the model is allowed an opinion about class
+   * precedence, and it lives here rather than on the node for a reason that only
+   * shows up at export. In CSS, `class="btn primary"` and `class="primary btn"`
+   * are the SAME element: the attribute's order contributes nothing, and which
+   * rule wins is decided by the order the rules appear in the stylesheet. So a
+   * model that read precedence off each node's list could express documents no
+   * stylesheet can reproduce — two nodes carrying the same classes in opposite
+   * orders would each demand a different winner, and one of them would have to
+   * render wrong. That is the WYSIWYG invariant broken in the model, before the
+   * emitter ever runs.
+   *
+   * Keeping the order here makes the emitter faithful by construction: it writes
+   * class rules in exactly this sequence, and the browser reproduces the
+   * resolver's answer for free. `.btn` before `.btn-primary` here means
+   * `.btn-primary` wins there, for every element that has both.
+   *
+   * An element that genuinely needs to disagree has node-local rules, which
+   * outrank every class — which is also what a CSS author would reach for.
+   */
+  readonly classOrder: readonly ClassName[];
 }
 
-export const EMPTY_STYLESHEET: StyleSheet = { rules: new Map(), index: new Map() };
+export const EMPTY_STYLESHEET: StyleSheet = {
+  rules: new Map(),
+  index: new Map(),
+  classOrder: [],
+};
 
 export function createStyleSheet(rules: readonly StyleRule[] = []): StyleSheet {
   let sheet = EMPTY_STYLESHEET;
@@ -147,16 +174,48 @@ export function putRule(sheet: StyleSheet, rule: StyleRule): StyleSheet {
   if (existingId !== undefined && existingId !== rule.id) rules.delete(existingId);
   rules.set(rule.id, rule);
 
-  return { rules, index: indexWith(sheet.index, rule.scope, rule.target, rule.id) };
+  return {
+    rules,
+    index: indexWith(sheet.index, rule.scope, rule.target, rule.id),
+    classOrder: withClass(sheet.classOrder, rule.scope),
+  };
 }
 
+/**
+ * A newly styled class joins the order at the END — the strongest position.
+ *
+ * It matches what the author just did: they made a class and styled it, and they
+ * expect that styling to take effect on the elements they put it on, not to lose
+ * silently to a class created last week. It is also what appending a rule to a
+ * stylesheet does in CSS.
+ */
+function withClass(order: readonly ClassName[], scope: StyleScope): readonly ClassName[] {
+  if (scope.kind !== 'class' || order.includes(scope.name)) return order;
+  return [...order, scope.name];
+}
+
+/**
+ * Removing a rule does NOT remove its class from the order.
+ *
+ * Deliberate, and the alternative is a trap. Unsetting a class's last property
+ * drops the rule and would drop the class from the order with it — so styling it
+ * again would append it at the strongest position, and a property it used to
+ * lose it would now win. The cascade would change because of an edit that only
+ * ever touched one value, with nothing on screen to explain it. A class with no
+ * rules contributes nothing anyway, so keeping the slot costs a string and buys
+ * a stable order. `removeScope` is the deliberate delete, and that one does drop it.
+ */
 export function removeRule(sheet: StyleSheet, id: StyleRuleId): StyleSheet {
   const rule = sheet.rules.get(id);
   if (!rule) return sheet;
 
   const rules = new Map(sheet.rules);
   rules.delete(id);
-  return { rules, index: indexWithout(sheet.index, rule.scope, rule.target) };
+  return {
+    rules,
+    index: indexWithout(sheet.index, rule.scope, rule.target),
+    classOrder: sheet.classOrder,
+  };
 }
 
 export function removeRuleAt(
@@ -183,7 +242,35 @@ export function removeScope(sheet: StyleSheet, scope: StyleScope): StyleSheet {
 
   const index = new Map(sheet.index);
   index.delete(sKey);
-  return { rules, index };
+
+  // The deliberate delete, so the class leaves the order too. Contrast
+  // `removeRule`, which keeps it.
+  const classOrder =
+    scope.kind === 'class'
+      ? sheet.classOrder.filter((name) => name !== scope.name)
+      : sheet.classOrder;
+
+  return { rules, index, classOrder };
+}
+
+/**
+ * Reorder class precedence outright — the style panel's "which class wins" control.
+ *
+ * Names not already in the sheet are ignored rather than added: the order is a
+ * ranking of classes that exist, and accepting arbitrary names would let a typo
+ * silently create one. Existing classes left out of `order` keep their relative
+ * position at the end, so a partial reorder cannot quietly drop a class's rank.
+ */
+export function setClassOrder(sheet: StyleSheet, order: readonly ClassName[]): StyleSheet {
+  const known = new Set(sheet.classOrder);
+  const ranked: ClassName[] = [];
+  for (const name of order) {
+    if (known.has(name) && !ranked.includes(name)) ranked.push(name);
+  }
+  for (const name of sheet.classOrder) {
+    if (!ranked.includes(name)) ranked.push(name);
+  }
+  return { ...sheet, classOrder: ranked };
 }
 
 /**
@@ -302,6 +389,25 @@ export function validateStyleSheet(sheet: StyleSheet): readonly string[] {
         );
       }
     }
+  }
+
+  /*
+   * Every styled class must have a rank.
+   *
+   * A class with rules but no place in `classOrder` is invisible to `scopesFor`,
+   * so its rules would silently stop applying — the sheet would look correct,
+   * `rules` would contain them, and nothing would render. Checked in one
+   * direction only: a rank with no rules is fine and deliberate (see
+   * `removeRule`).
+   */
+  const ranked = new Set(sheet.classOrder);
+  for (const rule of sheet.rules.values()) {
+    if (rule.scope.kind === 'class' && !ranked.has(rule.scope.name)) {
+      errors.push(`Class ".${rule.scope.name}" has rules but no place in classOrder.`);
+    }
+  }
+  if (ranked.size !== sheet.classOrder.length) {
+    errors.push('classOrder contains a duplicate, so one class has two ranks.');
   }
 
   for (const [id, rule] of sheet.rules) {
