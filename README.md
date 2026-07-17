@@ -2,12 +2,13 @@
 
 An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web from one codebase.
 
-> **Status: Phase C complete — the model and the edit layer.** The workspace installs, typechecks,
-> lints, tests, builds, and themes; `@vpb/core` carries the full style/cascade/document model (B1–B3),
-> and `@vpb/state` carries commands, undo/redo, and a headless store (C). There is still **nothing to
-> look at** — no renderer and no canvas, which is Phase D. The editor is real but currently drivable
-> only from a test. See the [Roadmap](#roadmap). Panels in the running app name the phase that fills
-> them rather than pretending to work.
+> **Status: Phase C complete; Phase D underway — the style compiler landed.** The workspace installs,
+> typechecks, lints, tests, builds, and themes; `@vpb/core` carries the style/cascade/document model
+> (B1–B3) **and the style compiler** (D1), and `@vpb/state` carries commands, undo/redo, and a
+> headless store (C). The model now compiles to real CSS, and the compiler is proven to rank rules
+> the way the resolver does. There is still **nothing to look at**: the renderer and the sandboxed
+> canvas are the rest of Phase D. See the [Roadmap](#roadmap). Panels in the running app name the
+> phase that fills them rather than pretending to work.
 
 See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
 [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
@@ -52,6 +53,7 @@ packages/
   core/                 @vpb/core   — the domain model. Framework-free, no DOM.
     identity/                         branded ids + injectable factory
     style/                            values, units, colour, property catalog, serialisation
+      compile.ts                      THE compiler: model -> CSS. Shared by canvas (D) and export (I)
     node/                             props, component registry, nodes, the node tree
     document/                         pages, project, asset library
   state/                @vpb/state  — the edit layer: commands, history, store. No React, no DOM.
@@ -119,7 +121,7 @@ IndexedDB and SQLite.
 Three axes compete when resolving what an element looks like. Strongest first:
 
 1. **State** — `default` < `hover`/`focus`/…
-2. **Scope** — `class[0]` < `class[1]` < … < node-local
+2. **Scope** — `classOrder[0]` < `classOrder[1]` < … < node-local
 3. **Breakpoint** — `base` < `tablet` < `mobile-landscape` < `mobile`
 
 _State over scope_, because a node-local `color: blue` must not silently strip the class's
@@ -128,11 +130,21 @@ when you resize.
 
 The payoff: **this is exactly what a browser produces from source-ordered CSS.** `:hover` adds a
 class-level specificity (0,2,0 vs 0,1,0), so state wins on specificity alone; media queries add no
-specificity, so within a state block source order decides. Phase D's emitter therefore needs no
-`@layer`, no `!important`, and no specificity hacks — it emits in the same nesting the resolver
-walks, and the browser reproduces the model for free. A model that agrees with the platform by
-construction cannot drift from it. That is the WYSIWYG invariant, established in the model rather
-than patched in the renderer.
+specificity, so within a state block source order decides. The emitter therefore needs no `@layer`,
+no `!important`, and no specificity hacks — it emits in the same nesting the resolver walks, and the
+browser reproduces the model for free. A model that agrees with the platform by construction cannot
+drift from it. That is the WYSIWYG invariant, established in the model rather than patched in the
+renderer.
+
+**Class precedence is the sheet's, not the element's** — `StyleSheet.classOrder`, project-wide. This
+paragraph used to be untrue on the scope axis, and Phase D found it: the resolver read precedence off
+each node's `classes` list, so `[alpha, beta]` and `[beta, alpha]` resolved differently. CSS has no
+such concept — `class="a b"` and `class="b a"` are the same element, and the stylesheet's order
+decides. Per-element ranking can therefore describe documents no stylesheet can reproduce (two
+elements, same classes, opposite orders, each demanding a different winner), which is not extra
+expressiveness but an unfixable export hole — §4.7's cardinal sin arriving through the model. A
+node's `classes` is now a set of references whose order is presentational; an element that must
+disagree with the ranking uses node-local rules, exactly as a CSS author would.
 
 ### Breakpoints are a graph, not a sorted list
 
@@ -246,14 +258,14 @@ One runner, four projects, each with the environment it needs (`vitest.config.ts
 
 | Project  | Environment | Covers                                             | Status          |
 | -------- | ----------- | -------------------------------------------------- | --------------- |
-| `core`   | node        | The domain model: style, cascade, tree, document    | 488 tests       |
+| `core`   | node        | The model: style, cascade, compiler, tree, document | 528 tests       |
 | `state`  | node        | Commands, inverses, history, the store             | 156 tests       |
 | `tokens` | node        | Token contract, CSS/TS parity, colour distinction   | 48 tests        |
 | `ui`     | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard  | 34 tests        |
 | `web`    | node        | The `index.html` anti-FOUC bootstrap contract       | 6 tests         |
 
 ```bash
-pnpm test                        # everything (732 today)
+pnpm test                        # everything (772 today)
 pnpm vitest run --project core   # one project
 ```
 
@@ -281,8 +293,8 @@ pnpm mutate --list         # show what would run, change nothing
 pnpm mutate --filter cycle # one mutation by name
 ```
 
-Every phase since B2 was built this way; **64 mutations are all caught** — 19 for Phase A, 19 for B3,
-26 for C.
+Every phase is built this way; **85 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for C,
+12 for D1.
 
 Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
 their first run, which proves only that they were written against code that already passed them.
@@ -365,7 +377,7 @@ the code still compiles and the tests still pass — which is precisely why it i
 | **B2** | **Cascade engine — breakpoints, targets, rules, stylesheet, resolver. ✅**      |
 | **B3** | **Document — node tree + index, component registry, page/project. ✅**          |
 | **C**  | **Commands, inverse-command history, Zustand store — headless and testable. ✅** |
-| D     | Renderer + style compiler; the shared-compiler WYSIWYG invariant            |
+| D      | Renderer + style compiler; the shared-compiler WYSIWYG invariant. **Compiler ✅, renderer next** |
 | E     | Interaction: overlay, structural drag, resize, multi-select, snap guides    |
 | F     | Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets  |
 | G     | HTML/CSS importer — the validator of the Phase B model                      |
