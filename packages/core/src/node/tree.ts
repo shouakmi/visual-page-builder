@@ -22,8 +22,9 @@ import { referencedAssets } from './props.ts';
  *
  * Because children are ids, a node's subtree is not nested inside it. Editing a
  * node replaces one entry in a shallowly-copied Map — O(nodes) pointer copies,
- * microseconds — instead of deep-cloning the document per keystroke. Phase C
- * replaces even the Map copy with immer patches for structural sharing.
+ * microseconds — instead of deep-cloning the document per keystroke. The Map's
+ * VALUES are shared by reference across versions, so this is already structural
+ * sharing; the copy is of the pointer table alone.
  *
  * `parents` is derived, and derived state maintained incrementally drifts, so
  * every mutation below maintains it in the same breath as `children` and

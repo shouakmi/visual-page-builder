@@ -33,8 +33,16 @@ import type { StyleValue } from './values.ts';
  * IMMUTABILITY — every operation returns a new sheet. The Map copy is O(rules),
  * shallow: a few hundred pointer copies, microseconds. This is categorically
  * different from the prototype's O(nodes) DEEP clone of the whole document per
- * keystroke. Phase C replaces even this with immer patches for structural
- * sharing, which the history system needs anyway.
+ * keystroke, and the rules themselves are shared by reference between versions,
+ * so it is already structural sharing.
+ *
+ * An earlier draft of this comment promised that Phase C would "replace even
+ * this with immer patches for structural sharing". It does not, because the
+ * claim was wrong twice over: immer shallow-copies a Map on write exactly as
+ * this does, and immer can only produce fine-grained patches by mutating a
+ * draft, which these pure functions never do. Phase C's history is inverse
+ * commands — see `@vpb/state/command.ts`, and AUDIT §4.3, which asks for
+ * "immer patches / inverse commands" and is satisfied by either.
  */
 export interface StyleSheet {
   readonly rules: ReadonlyMap<StyleRuleId, StyleRule>;
