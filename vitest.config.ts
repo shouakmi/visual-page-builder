@@ -48,6 +48,16 @@ export default defineConfig({
       {
         plugins: [react()],
         test: {
+          name: 'renderer',
+          root: './packages/renderer',
+          environment: 'jsdom',
+          setupFiles: ['./src/test/setup.ts'],
+          include: ['src/**/*.test.{ts,tsx}'],
+        },
+      },
+      {
+        plugins: [react()],
+        test: {
           name: 'ui',
           root: './packages/ui',
           environment: 'jsdom',
