@@ -189,6 +189,68 @@ describe('rendering into the frame', () => {
   });
 });
 
+/**
+ * THE BUG THAT ONLY RUNNING THE APP FOUND.
+ *
+ * `createPage` roots every tree at a `vpb:body`, whose tag is literally `body`
+ * — correct, because on export that node IS the document's body. The canvas
+ * hosts the page in an iframe that already has one, so rendering the root inside
+ * it produced `<body><body>` and React refused to nest it.
+ *
+ * Every renderer test mounts into a `<div>`, where nesting a body is merely
+ * unusual rather than illegal — so the whole suite was green while the app
+ * logged a hydration error on first paint. The frame's body IS the page's body:
+ * the root's children go in it and the root's class goes on it.
+ */
+describe('the frame body is the page body', () => {
+  it('puts the page root class on the frame body', () => {
+    const { doc } = mount(
+      <CanvasFrame css="" title="Canvas" bodyClassName="n-root hero">
+        <div />
+      </CanvasFrame>,
+    );
+    expect(doc?.body.getAttribute('class')).toBe('n-root hero');
+  });
+
+  it('updates the body class in place rather than replacing the body', () => {
+    const { doc, rerender } = mount(
+      <CanvasFrame css="" title="Canvas" bodyClassName="n-root a">
+        <div />
+      </CanvasFrame>,
+    );
+    const body = doc?.body;
+
+    rerender(
+      <CanvasFrame css="" title="Canvas" bodyClassName="n-root b">
+        <div />
+      </CanvasFrame>,
+    );
+
+    expect(doc?.body).toBe(body);
+    expect(doc?.body.getAttribute('class')).toBe('n-root b');
+  });
+
+  it('leaves the body unclassed when no class is given', () => {
+    const { doc } = mount(
+      <CanvasFrame css="" title="Canvas">
+        <div />
+      </CanvasFrame>,
+    );
+    expect(doc?.body.getAttribute('class')).toBe('');
+  });
+
+  it('never nests a body inside the frame body', () => {
+    const { doc } = mount(
+      <CanvasFrame css="" title="Canvas" bodyClassName="n-root">
+        <section id="page">content</section>
+      </CanvasFrame>,
+    );
+
+    expect(doc?.body.querySelector('body')).toBeNull();
+    expect(doc?.body.querySelector('#page')?.textContent).toBe('content');
+  });
+});
+
 describe('onReady', () => {
   it('hands the frame document to the host once — Phase E wires events here', () => {
     const seen: Document[] = [];

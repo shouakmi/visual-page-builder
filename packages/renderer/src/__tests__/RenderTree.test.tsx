@@ -30,7 +30,7 @@ import {
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { RenderTree } from '../RenderTree.tsx';
+import { RenderChildren, RenderTree } from '../RenderTree.tsx';
 import { createBuiltinRenderers, type RenderEnvironment } from '../renderers.tsx';
 
 const registry = createBuiltinRegistry();
@@ -100,6 +100,32 @@ describe('structure', () => {
     const { container } = render(<RenderTree tree={next} env={env()} from={box.id} />);
     expect(container.querySelector('body')).toBeNull();
     expect(container.querySelector(`.n-${box.id}`)).not.toBeNull();
+  });
+
+  /**
+   * THE TRAP THAT FORCES `RenderChildren` TO EXIST — recorded, because it is
+   * invisible and it bites silently.
+   *
+   * The page root is a `vpb:body`, whose tag is literally `body`; correct,
+   * because on export that node IS the document's body. But React treats
+   * `<body>` as a document singleton: asked to render one, it emits the
+   * CHILDREN and drops the element — **and its className with it**. No error,
+   * no thrown exception; the node-scoped rules for the page body simply never
+   * match anything.
+   *
+   * So rendering a page through `RenderTree` from the root is quietly wrong. The
+   * host must map the root onto the real body instead: `RenderChildren` for the
+   * contents, `CanvasFrame`'s `bodyClassName` for the class.
+   */
+  it('drops the page root element, because React treats body as a singleton', () => {
+    const { tree, ids } = editor();
+    const box = make(ids, BOX_COMPONENT_ID);
+    const { container } = renderTree(add(tree, box));
+
+    expect(container.querySelector('body')).toBeNull();
+    // The children survive; the body and its class do not.
+    expect(container.querySelector(`.n-${box.id}`)).not.toBeNull();
+    expect(container.querySelector(`.n-${tree.root}`)).toBeNull();
   });
 
   it('renders nothing for a node that is not in the tree', () => {
@@ -470,6 +496,39 @@ describe('unknown components', () => {
 
     expect(() => renderTree(next)).not.toThrow();
     expect(document.body.querySelector('.n-' + box.id)).toBeNull();
+  });
+});
+
+describe('RenderChildren', () => {
+  it('renders the children without the node itself', () => {
+    const { tree, ids } = editor();
+    const box = make(ids, BOX_COMPONENT_ID);
+    const next = add(tree, box);
+
+    const { container } = render(<RenderChildren tree={next} env={env()} />);
+
+    expect(container.querySelector('body')).toBeNull();
+    expect(container.querySelector(`.n-${box.id}`)).not.toBeNull();
+  });
+
+  it('renders the children of any node, not just the root', () => {
+    const { tree, ids } = editor();
+    const outer = make(ids, BOX_COMPONENT_ID);
+    const inner = make(ids, TEXT_COMPONENT_ID, { text: propString('Hi') });
+
+    let next = add(tree, outer);
+    next = add(next, inner, outer.id);
+
+    const { container } = render(<RenderChildren tree={next} env={env()} of={outer.id} />);
+
+    expect(container.querySelector(`.n-${outer.id}`)).toBeNull();
+    expect(container.querySelector(`.n-${inner.id}`)?.textContent).toBe('Hi');
+  });
+
+  it('renders nothing for a childless node', () => {
+    const { tree } = editor();
+    const { container } = render(<RenderChildren tree={tree} env={env()} />);
+    expect(container.innerHTML).toBe('');
   });
 });
 

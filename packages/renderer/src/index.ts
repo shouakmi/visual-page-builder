@@ -1,6 +1,6 @@
 /* The tree walker — node tree as React elements. */
-export { RenderTree, renderNode } from './RenderTree.tsx';
-export type { RenderTreeProps } from './RenderTree.tsx';
+export { RenderTree, RenderChildren, renderNode } from './RenderTree.tsx';
+export type { RenderTreeProps, RenderChildrenProps } from './RenderTree.tsx';
 
 /* The canvas — a sandboxed iframe that cannot run code. */
 export { CanvasFrame } from './CanvasFrame.tsx';

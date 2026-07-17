@@ -37,6 +37,47 @@ export function RenderTree({ tree, env, from }: RenderTreeProps): ReactElement {
   return <Fragment>{renderNode(tree, from ?? tree.root, env)}</Fragment>;
 }
 
+export interface RenderChildrenProps {
+  readonly tree: NodeTree;
+  readonly env: RenderEnvironment;
+  /** Defaults to the root — i.e. the page's body. */
+  readonly of?: NodeId;
+}
+
+/**
+ * Render a node's children WITHOUT the node itself.
+ *
+ * This exists for one specific, non-obvious, and SILENT reason: **the page root
+ * is a `<body>`**. `createPage` roots every tree at a `vpb:body`, whose tag is
+ * literally `body` — correct, because on export that node *is* the document's
+ * body.
+ *
+ * React treats `<body>` as a document singleton. Asked to render one, it emits
+ * the element's CHILDREN and drops the element — **and its className with it**.
+ * Not an exception, not a refusal: `render(<body className="x">hi</body>)` has
+ * innerHTML `"hi"`. So `RenderTree` from a page root renders a page whose body
+ * rules match nothing, and says nothing about it.
+ *
+ * The fix is not to give the root some other tag — that would make the canvas
+ * disagree with the export, the one thing this phase exists to prevent. It is to
+ * recognise that the host's body IS the page's body: render the root's children
+ * into it, and put the root's class on it (`CanvasFrame`'s `bodyClassName`).
+ * Phase I's exporter does the identical thing with the real document.
+ *
+ * Found by running the app, not by the suite: every renderer test mounts into a
+ * `<div>`, where this is invisible rather than merely wrong.
+ */
+export function RenderChildren({ tree, env, of }: RenderChildrenProps): ReactElement {
+  const parentId = of ?? tree.root;
+  return (
+    <Fragment>
+      {childrenOf(tree, parentId).map((child) => (
+        <Fragment key={child.id}>{renderNode(tree, child.id, env)}</Fragment>
+      ))}
+    </Fragment>
+  );
+}
+
 /**
  * Render one node and its descendants.
  *

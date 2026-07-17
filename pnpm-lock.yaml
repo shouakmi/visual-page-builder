@@ -59,6 +59,15 @@ importers:
 
   apps/web:
     dependencies:
+      '@vpb/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@vpb/renderer':
+        specifier: workspace:*
+        version: link:../../packages/renderer
+      '@vpb/state':
+        specifier: workspace:*
+        version: link:../../packages/state
       '@vpb/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens
@@ -71,6 +80,9 @@ importers:
       react-dom:
         specifier: ^19.2.0
         version: 19.2.7(react@19.2.7)
+      zustand:
+        specifier: ^5.0.8
+        version: 5.0.14(@types/react@19.2.17)(react@19.2.7)
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3

@@ -59,6 +59,14 @@ export interface CanvasFrameProps {
   readonly title: string;
   /** Styles the frame element itself — the device width lives here. */
   readonly className?: string;
+  /**
+   * The class list for the frame's `<body>`.
+   *
+   * The page's root node IS this body — see `RenderChildren`. Its own class
+   * (`n-<rootId>`) has to land here, or every rule the user sets on the page body
+   * targets an element that does not exist.
+   */
+  readonly bodyClassName?: string;
   /** Called once the frame's document exists, for Phase E's event wiring. */
   readonly onReady?: (doc: Document) => void;
 }
@@ -66,7 +74,14 @@ export interface CanvasFrameProps {
 /** Everything inside is the user's design, so the frame starts with no styling of ours. */
 const RESET = 'html,body{margin:0;padding:0}';
 
-export function CanvasFrame({ css, children, title, className, onReady }: CanvasFrameProps) {
+export function CanvasFrame({
+  css,
+  children,
+  title,
+  className,
+  bodyClassName,
+  onReady,
+}: CanvasFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [doc, setDoc] = useState<Document | null>(null);
 
@@ -105,6 +120,18 @@ export function CanvasFrame({ css, children, title, className, onReady }: Canvas
     const next = `${RESET}\n${css}`;
     if (style.textContent !== next) style.textContent = next;
   }, [doc, css]);
+
+  /**
+   * The page root's class, on the frame's body.
+   *
+   * Set as an attribute rather than through the portal because React does not
+   * own this element — it owns the nodes inside it. Writing `className` keeps the
+   * same body element, which is the §4.6 rule applied to one more attribute.
+   */
+  useEffect(() => {
+    if (!doc) return;
+    doc.body.className = bodyClassName ?? '';
+  }, [doc, bodyClassName]);
 
   return (
     <iframe
