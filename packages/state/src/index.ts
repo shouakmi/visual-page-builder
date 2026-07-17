@@ -31,3 +31,14 @@ export {
   moveNodeCommand,
   restoreNodePositionCommand,
 } from './commands/nodeCommands.ts';
+
+export { setStylePropertyCommand, unsetStylePropertyCommand } from './commands/styleCommands.ts';
+
+export {
+  setNodePropCommand,
+  unsetNodePropCommand,
+  renameNodeCommand,
+  setNodeClassesCommand,
+  addClassCommand,
+  removeClassCommand,
+} from './commands/propCommands.ts';
