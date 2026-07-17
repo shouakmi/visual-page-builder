@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@vpb/core": "workspace:*",
+    "@vpb/interaction": "workspace:*",
     "@vpb/renderer": "workspace:*",
     "@vpb/state": "workspace:*",
     "@vpb/tokens": "workspace:*",

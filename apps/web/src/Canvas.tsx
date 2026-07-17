@@ -7,10 +7,12 @@ import {
 } from '@vpb/core';
 import { CanvasFrame, RenderChildren, classNameFor, createBuiltinRenderers } from '@vpb/renderer';
 import { activePage, type EditorState, type EditorStore } from '@vpb/state';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 
+import { createDragController } from './dragController.ts';
+import { resolveDrop } from './resolveDrop.ts';
 import { SelectionLayer } from './SelectionLayer.tsx';
 
 /**
@@ -78,18 +80,38 @@ export function Canvas({ store }: CanvasProps) {
    * hands the document over exactly for this (its `onReady` comment names Phase E).
    */
   const [frameDoc, setFrameDoc] = useState<Document | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  /** The drag machine wired to the store. Rebuilt only if the store changes. */
+  const drag = useMemo(
+    () => createDragController(store, { onDraggingChange: setDragging }),
+    [store],
+  );
 
   /**
-   * Click to select. The overlay above the frame is `pointer-events-none`, so the
-   * press lands in the frame and this listener — attached by the parent, which is
-   * allowed under `allow-same-origin` — recovers the node from its hit-test handle.
+   * Live values for the pointer handlers, so the listeners bind ONCE per frame
+   * document rather than re-attaching on every edit (which would drop an in-flight
+   * drag). `treeRef` is what `resolveDrop` measures against; `draggedIdRef` is the
+   * node the press armed.
+   */
+  const treeRef = useRef(page.tree);
+  treeRef.current = page.tree;
+  const draggedIdRef = useRef<NodeId | null>(null);
+
+  /**
+   * Click to select, press-and-drag to move. The overlay above the frame is
+   * `pointer-events-none`, so the press lands in the frame and these listeners —
+   * attached by the parent, allowed under `allow-same-origin` — drive both.
    *
-   * Nearest handle up from the target, so clicking the text inside a heading
-   * selects the heading. No handle at all means the bare body was hit: clear. Shift
-   * or ctrl/cmd extends the selection rather than replacing it (Phase E multi-select).
+   * A press selects the nearest handle up from the target (so clicking the text
+   * inside a heading selects the heading; a bare-body press clears) AND arms a drag
+   * on that node. The drag only begins once the pointer crosses the controller's
+   * threshold, so a plain click never moves anything.
    */
   useEffect(() => {
     if (!frameDoc) return;
+
+    let armed = false;
 
     const onPointerDown = (event: PointerEvent) => {
       // Not `instanceof Element`: the frame is same-origin, so React creates these
@@ -108,11 +130,53 @@ export function Canvas({ store }: CanvasProps) {
       } else {
         store.getState().select([id]);
       }
+      armed = true;
+      draggedIdRef.current = id;
+      drag.down(id, { x: event.clientX, y: event.clientY });
+    };
+
+    /*
+     * ⚠️ BROWSER-PENDING glue — see resolveDrop.ts. The DECISION (threshold,
+     * preview, commit) lives in the tested controller; this only feeds it a
+     * pointer and, once dragging, a resolved drop. Following the pointer OUT of the
+     * iframe mid-drag needs pointer capture, the browser-specific piece still to do.
+     */
+    const onPointerMove = (event: PointerEvent) => {
+      if (!armed) return;
+      const pointer = { x: event.clientX, y: event.clientY };
+      const draggedId = draggedIdRef.current;
+      const drop =
+        drag.isDragging() && draggedId
+          ? resolveDrop({ doc: frameDoc, tree: treeRef.current, registry, draggedId, pointer })
+          : null;
+      drag.move(pointer, drop);
+    };
+
+    const onPointerUp = () => {
+      if (!armed) return;
+      armed = false;
+      drag.up();
     };
 
     frameDoc.addEventListener('pointerdown', onPointerDown);
-    return () => frameDoc.removeEventListener('pointerdown', onPointerDown);
-  }, [frameDoc, store]);
+    frameDoc.addEventListener('pointermove', onPointerMove);
+    frameDoc.addEventListener('pointerup', onPointerUp);
+    return () => {
+      frameDoc.removeEventListener('pointerdown', onPointerDown);
+      frameDoc.removeEventListener('pointermove', onPointerMove);
+      frameDoc.removeEventListener('pointerup', onPointerUp);
+    };
+  }, [frameDoc, store, drag]);
+
+  /** Escape cancels an in-flight drag — on the parent document, where focus lives. */
+  useEffect(() => {
+    if (!dragging) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') drag.cancel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [dragging, drag]);
 
   return (
     <div className="flex h-full justify-center overflow-auto bg-surface-sunken p-6">
@@ -137,6 +201,15 @@ export function Canvas({ store }: CanvasProps) {
           <RenderChildren tree={page.tree} env={env} />
         </CanvasFrame>
         <SelectionLayer store={store} doc={frameDoc} />
+        {dragging && (
+          /*
+            ⚠️ BROWSER-PENDING — the drag shield. `pointer-events-none` for now so it
+            does not steal the events the frame-document listeners rely on; giving it
+            pointer capture (to keep the drag alive off the iframe and show a grabbing
+            cursor) is the browser-specific step still to finish.
+          */
+          <div className="pointer-events-none absolute inset-0 z-10" aria-hidden />
+        )}
       </div>
     </div>
   );

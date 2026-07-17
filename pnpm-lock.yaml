@@ -62,6 +62,9 @@ importers:
       '@vpb/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@vpb/interaction':
+        specifier: workspace:*
+        version: link:../../packages/interaction
       '@vpb/renderer':
         specifier: workspace:*
         version: link:../../packages/renderer

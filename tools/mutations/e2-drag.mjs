@@ -9,9 +9,13 @@
  *
  * The composition tests run the returned index through core's real `moveNode`, so
  * an off-by-one that "passes" the pure arithmetic still fails against the tree.
+ *
+ * The second block is the drag STATE MACHINE — the same headless package, the same
+ * test project. A drag is a sequence, and its bugs are sequence bugs: firing before
+ * the threshold, committing a click, not reverting on escape.
  */
 export default {
-  name: 'E2 — drag geometry',
+  name: 'E2 — drag geometry + machine',
   testCommand: 'pnpm vitest run --project interaction --silent',
   mutations: [
     {
@@ -46,6 +50,39 @@ export default {
       file: 'packages/interaction/src/dropTarget.ts',
       find: "  return axis === 'vertical' ? rect.top + rect.height / 2 : rect.left + rect.width / 2;",
       replace: "  return axis === 'vertical' ? rect.top : rect.left;",
+    },
+
+    /* ---- the drag state machine ---------------------------------------- */
+    {
+      // A press one pixel short of the threshold must not drag. Loosen `>=` to `>`
+      // and a drag exactly at the threshold silently fails to start.
+      name: 'the threshold excludes its own boundary',
+      file: 'packages/interaction/src/dragMachine.ts',
+      find: 'distance(state.origin, input.point) >= options.threshold',
+      replace: 'distance(state.origin, input.point) > options.threshold',
+    },
+    {
+      // Invert the threshold and a click becomes a drag while a real drag stalls.
+      name: 'the threshold test is inverted',
+      file: 'packages/interaction/src/dragMachine.ts',
+      find: 'distance(state.origin, input.point) >= options.threshold',
+      replace: 'distance(state.origin, input.point) < options.threshold',
+    },
+    {
+      // Release must commit the previewed move. Drop the commit and every drag
+      // reverts on release — the move never reaches history.
+      name: 'release no longer commits the drag',
+      file: 'packages/interaction/src/dragMachine.ts',
+      find: "        intent: state.phase === 'dragging' ? { type: 'commit' } : { type: 'none' },",
+      replace: "        intent: { type: 'none' },",
+    },
+    {
+      // Escape must revert the preview. Drop the cancel and Escape leaves the
+      // half-finished move on screen, uncommitted and unrevertable.
+      name: 'escape no longer cancels the drag',
+      file: 'packages/interaction/src/dragMachine.ts',
+      find: "        state: IDLE,\n        intent: state.phase === 'dragging' ? { type: 'cancel' } : { type: 'none' },",
+      replace: "        state: IDLE,\n        intent: { type: 'none' },",
     },
   ],
 };
