@@ -2,12 +2,14 @@
 
 An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web from one codebase.
 
-> **Status: Phase A — Foundation.** The workspace installs, typechecks, lints, tests, builds, and
-> themes. There is no editor yet; see the [Roadmap](#roadmap). Panels in the running app name the
-> phase that fills them rather than pretending to work.
+> **Status: Phase B complete — the domain model.** The workspace installs, typechecks, lints, tests,
+> builds, and themes, and `@vpb/core` carries the full style/cascade/document model (B1–B3). There is
+> no editor yet — no store, no renderer, no canvas; Phase C is next. See the [Roadmap](#roadmap).
+> Panels in the running app name the phase that fills them rather than pretending to work.
 
-See [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase
-replaces, and the reasoning behind the roadmap ordering.
+See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
+[`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
+including the reasoning behind the roadmap ordering.
 
 ---
 
@@ -179,10 +181,10 @@ in either direction, in either colour mode.
 making every dark-mode panel border invisible against its own background. The code read perfectly.
 Only a running browser reporting `panelBg === panelBorder` caught it.
 
-> **⚠️ NOT CURRENTLY ENFORCED.** `tokens.test.ts` was destroyed in the 2026-07-17 incident (see
-> "Recovered packages" below) and has not yet been rewritten. Until it is, **nothing fails the build if
-> `semantic.ts` and `theme.css` drift apart**, and nothing catches a `border`/`surfaceRaised`
-> collision. Edit either file with care, and treat restoring this suite as a priority.
+The expectations are *derived* from `SEMANTIC_TOKENS` rather than written out, in both directions: a
+token with no CSS property fails, and a `--vpb-color-*` property with no token fails too. A
+hand-maintained list of expected property names would be a third representation free to drift from
+the other two.
 
 ### Tailwind must be told about the UI package
 
@@ -202,27 +204,22 @@ One runner, four projects, each with the environment it needs (`vitest.config.ts
 | Project  | Environment | Covers                                             | Status          |
 | -------- | ----------- | -------------------------------------------------- | --------------- |
 | `core`   | node        | The domain model: style, cascade, tree, document    | 488 tests       |
-| `tokens` | node        | Token contract, CSS/TS parity, colour distinction   | **0 — lost**    |
-| `ui`     | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard  | **0 — lost**    |
+| `tokens` | node        | Token contract, CSS/TS parity, colour distinction   | 48 tests        |
+| `ui`     | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard  | 34 tests        |
 | `web`    | node        | The `index.html` anti-FOUC bootstrap contract       | 6 tests         |
 
 ```bash
-pnpm test                        # everything (494 today)
+pnpm test                        # everything (576 today)
 pnpm vitest run --project core   # one project
 ```
 
-> **⚠️ `tokens` and `ui` currently have NO tests.** Both suites (~69 tests) were destroyed in the
-> 2026-07-17 incident and could not be recovered — see "Recovered packages" below. `pnpm verify` is
-> green *with that hole in it*: a green run says nothing about those two packages. Rewriting them is
-> the top pending task.
+**Testing philosophy.** Tests assert behaviour through public surfaces, never internals. The theme
+suite drives a real `ThemeToggle` with real clicks and keystrokes and asserts on accessible names and
+the class on the target element — not on context internals. Injectable seams (`ThemeStorage`,
+`SystemThemeSource`) exist so this needs no mocking framework and no global stubs; a test that
+reaches for `vi.mock` means a seam has failed.
 
-**Testing philosophy** (what the lost suites did, and what their replacements must do). Tests assert
-behaviour through public surfaces, never internals. The theme suite drove a real `ThemeToggle` with
-real clicks and keystrokes and asserted on accessible names and `<html>` classes — not on context
-internals. Injectable seams (`ThemeStorage`, `SystemThemeSource`) exist so this needs no mocking
-framework and no global stubs.
-
-Adapters are treated as untrusted: the suite proved the provider survives storage that throws on
+Adapters are treated as untrusted: the suite proves the provider survives storage that throws on
 read, throws on write, or returns garbage. A dropped theme preference must never cost a white screen.
 
 ### Mutation testing — `pnpm mutate`
@@ -240,7 +237,18 @@ pnpm mutate --list         # show what would run, change nothing
 pnpm mutate --filter cycle # one mutation by name
 ```
 
-B2 and B3 were both built this way; B3's 19 mutations are all caught. The harness checks the baseline
+B2 and B3 were both built this way; B3's 19 mutations and Phase A's 19 are all caught — 38 in total.
+
+Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
+their first run, which proves only that they were written against code that already passed them.
+Mutation testing then found one that was **vacuous**: *"survives storage that throws on write"* still
+passed with the `try`/`catch` it exists to protect deleted. React does not propagate a throw from a
+click handler back to the caller — it *reports* it — so `await user.click(...)` resolved happily
+while the handler exploded, and the test's assertions (the preference still applied) held either way
+because `setPreferenceState` runs before the write. The test now asserts on errors escaping to
+`window`, and catches it. **A test written after the code is a hypothesis until a mutation falsifies it.**
+
+The harness checks the baseline
 is green before it starts (a red baseline would score every mutation "caught" by a failure it did not
 cause), restores files on **every** exit path including Ctrl-C, and verifies each restore is
 byte-exact. A pattern that no longer matches is reported `STALE` and fails the run rather than
@@ -259,19 +267,21 @@ They were rebuilt from the one artifact that survived: the previous `vite build`
 | `tokens`: `palette.ts`, `semantic.ts` — `ui`: `theme.ts`, `storage.ts`, `systemTheme.ts`, `ThemeProvider.tsx`, `ThemeToggle.tsx`, `useTheme.ts`, `cn.ts`, `Button.tsx`, `Panel.tsx`, `AppShell.tsx` | **Byte-exact original**, from the sourcemap |
 | both `package.json` + `tsconfig.json`, both `src/index.ts` barrels, `ui/src/test/setup.ts` | **Reconstructed** — never bundled, so never in the map |
 | `tokens/src/theme.css` | **Reconstructed, then verified**: the rebuilt CSS reproduces all 36 original `--vpb-color-*` declarations (18 tokens × 2 modes) identically against the archived bundle |
-| `tokens.test.ts`, `theme.test.ts` | **Lost.** Not bundled, so unrecoverable — must be rewritten |
+| `tokens.test.ts`, `theme.test.ts` | **Lost, and since rewritten** (2026-07-17). Not bundled, so the originals are unrecoverable; the replacements are new work, written against the recovered sources and validated by `pnpm mutate --set a-theming` |
 
 The recovered stack was checked live: React mounts, `theme.css` resolves, the toggle flips dark↔light
 with correct values both ways, and the preference persists. The reconstructed files are marked above
 because they are *inference from the architecture*, not the original bytes — if one behaves oddly,
 suspect it before suspecting the recovered originals.
 
-**The pre-move `dist/` is archived outside the repo and is the only copy of that source. Do not delete
-it until the two lost suites are restored.** A `pnpm build` overwrites `dist/`; the archive was taken
-minutes before the next build.
+The pre-move `dist/` is archived outside the repo and was the only copy of that source. Both lost
+suites have now been rewritten and the recovered sources are committed, so the archive is no longer
+load-bearing — keep it until the first post-recovery release if you want a second opinion on a
+recovered file, but nothing depends on it.
 
-**This repo still has no version control.** All of the above was survivable only because a sourcemap
-happened to exist. `git init` is the top pending task.
+**The repo now has version control** (`git init`, 2026-07-17): the recovery is committed as
+`6da69ce`, with `origin` on GitHub. All of the above was survivable only because a sourcemap happened
+to exist, which is not a backup strategy. Commit before, not after, the next incident.
 
 ### Encoding is checked in `verify`
 
