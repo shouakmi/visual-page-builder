@@ -5,10 +5,14 @@ import { defineConfig } from 'vitest/config';
  * One test runner, four projects.
  *
  * Each package gets the environment it actually needs rather than paying for the
- * heaviest common denominator: `@vpb/core` and `@vpb/tokens` are pure logic, so
- * they run in Node; `@vpb/ui` renders React and needs jsdom; `@vpb/web` only
- * asserts on static assets today. Running the core or token suites in jsdom would
- * cost a DOM per file to test string manipulation.
+ * heaviest common denominator: `@vpb/core`, `@vpb/tokens` and `@vpb/state` are
+ * pure logic, so they run in Node; `@vpb/ui` renders React and needs jsdom;
+ * `@vpb/web` only asserts on static assets today. Running the core or token
+ * suites in jsdom would cost a DOM per file to test string manipulation.
+ *
+ * `state` running in **node** is a gate, not a preference: Phase C is required to
+ * be headless. If a store or command ever reaches for `window`, this project is
+ * where that fails.
  *
  * Defined inline rather than as per-package vitest.config.ts files so that test
  * policy is visible in one place. Revisit if a package needs genuinely bespoke
@@ -29,6 +33,14 @@ export default defineConfig({
         test: {
           name: 'tokens',
           root: './packages/tokens',
+          environment: 'node',
+          include: ['src/**/*.test.ts'],
+        },
+      },
+      {
+        test: {
+          name: 'state',
+          root: './packages/state',
           environment: 'node',
           include: ['src/**/*.test.ts'],
         },

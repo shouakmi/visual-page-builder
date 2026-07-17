@@ -52,6 +52,8 @@ packages/
     style/                            values, units, colour, property catalog, serialisation
     node/                             props, component registry, nodes, the node tree
     document/                         pages, project, asset library
+  state/                @vpb/state  — the edit layer: commands, history, store. No React, no DOM.
+    editorState.ts                    the document + where the user is in it
   tokens/               @vpb/tokens — design tokens: palette, semantic scale, theme.css
   ui/                   @vpb/ui     — design system: theming, primitives, app shell
 tools/                  repo scripts
@@ -67,6 +69,13 @@ Packages arriving later, per the roadmap: `renderer`, `storage`, `export`, `impo
 model has to run in three places the browser is not: Node tests, the Electron main process, and
 (eventually) a server-side export worker. The prototype's model lived inside a React hook and could
 run in none of them.
+
+**`@vpb/state` is a separate package for that same reason.** Core is the document — the thing
+Electron's main process and the export worker load. The edit layer is the *editor*: selection, undo
+stacks, a store. Those three hosts need the former and have no use for the latter, so the store's
+dependencies (Zustand) stay out of the package that must run everywhere. `@vpb/state` is headless
+too — its Vitest project runs in **node**, so a `window` reference anywhere in it fails the build
+rather than waiting for Phase J to discover it.
 
 ---
 
