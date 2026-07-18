@@ -24,7 +24,7 @@ E4 (multi-select ops + batching) is next. See the Phase E section.
 | | |
 | --- | --- |
 | Last session | 2026-07-18 — E3 shipped: `resizeGeometry` + `resizeMachine` (`@vpb/interaction`), `setStylePropertiesCommand` (`@vpb/state`), `resizeController` + `ResizeHandles` (`apps/web`), tests, and the `e3-resize` mutation set |
-| Git | branch **`phase-c`**, ahead of `main` @ `6da69ce`; the E3 commit sits on top of `11b4935` (E2 app slice) — see the hash below once committed. **Not pushed, not merged.** Rename to `phase-e` or merge. |
+| Git | branch **`phase-c`**, **22 commits** ahead of `main` @ `6da69ce`; the E3 feature commit is `faf9dad`, on top of the E2 app slice `11b4935` (this line is pinned by a trailing docs commit, so the literal tip is that pointer). **Not pushed, not merged.** Rename to `phase-e` or merge. |
 | Working tree | Clean (E3 + these doc updates committed) |
 | `pnpm verify` | Green — typecheck, lint, encoding, **916 tests across 41 files**, build (re-run 2026-07-18) |
 | `pnpm mutate` | Green — **153/153 caught** (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14) |
