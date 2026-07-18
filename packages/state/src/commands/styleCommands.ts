@@ -138,6 +138,127 @@ export function setStylePropertyCommand(
   };
 }
 
+/** One property and the value to set it to, for the plural command below. */
+export interface StyleDeclarationInput {
+  readonly property: StyleProperty;
+  readonly value: StyleValue;
+}
+
+/** A property and the value it held before an edit — `undefined` when it was unset. */
+interface PriorDeclaration {
+  readonly property: StyleProperty;
+  readonly value: StyleValue | undefined;
+}
+
+function stylePropertiesCoalesceKey(
+  scope: StyleScope,
+  target: StyleTarget,
+  declarations: readonly StyleDeclarationInput[],
+): string {
+  // The properties, sorted, so the key is stable across a gesture whatever order
+  // they arrive in — and DISTINCT from a gesture editing a different set, which is
+  // a separate intention and must not merge into this one.
+  const properties = declarations
+    .map((declaration) => declaration.property)
+    .slice()
+    .sort()
+    .join(',');
+  return `setStyleProperties:${scopeKey(scope)}:${targetKey(target)}:${properties}`;
+}
+
+/**
+ * Set SEVERAL properties on one (scope, target) as ONE history entry.
+ *
+ * A corner resize sets width AND height, and that is one user intention: one undo
+ * must put both back. Two `setStylePropertyCommand`s would be two coalesce keys and
+ * so two entries, and Ctrl+Z would restore the height but not the width — a half-
+ * undone box. This is the minimal answer; Phase E4's `batchCommand` composite,
+ * which spans MULTIPLE nodes, is the general one and lands with multi-select ops.
+ *
+ * The inverse restores every property to exactly what it was, `unset` included, so
+ * an undo of a resize on a box that had no explicit size returns it to auto sizing
+ * rather than pinning it at its measured pixels.
+ */
+export function setStylePropertiesCommand(
+  scope: StyleScope,
+  target: StyleTarget,
+  declarations: readonly StyleDeclarationInput[],
+  ruleId: StyleRuleId,
+): Command {
+  return {
+    kind: 'setStyleProperties',
+    label: `Set ${declarations.map((declaration) => declaration.property).join(', ')}`,
+    coalesceKey: stylePropertiesCoalesceKey(scope, target, declarations),
+    apply(state) {
+      for (const { property, value } of declarations) {
+        if (!acceptsValue(property, value)) {
+          return refuse(`${property} does not accept a ${value.kind} value.`);
+        }
+      }
+
+      // Read every prior value BEFORE any write — one `setProperty` can create the
+      // rule the next one reads, so the pre-edit picture only exists up front.
+      const existing = findRule(state.project.styles, scope, target);
+      const priors: PriorDeclaration[] = declarations.map(({ property }) => ({
+        property,
+        value: existing ? getDeclaration(existing.declarations, property) : undefined,
+      }));
+
+      let styles = state.project.styles;
+      for (const { property, value } of declarations) {
+        styles = setProperty(styles, scope, target, property, value, fixedStyleRuleId(ruleId));
+      }
+
+      const next: EditorState = {
+        ...state,
+        project: { ...state.project, styles },
+      };
+      return succeed(next, restoreStyleDeclarationsCommand(scope, target, priors, ruleId));
+    },
+  };
+}
+
+/**
+ * The inverse of `setStylePropertiesCommand`: put a set of properties back to the
+ * values they held, restoring `unset` as an unset rather than a stored value.
+ *
+ * Private because it is only ever a recorded inverse; it recomputes its own inverse
+ * from the state at apply time (symmetric with `setStyleProperties`), so undo/redo
+ * chains through it without history holding a stale forward value.
+ */
+function restoreStyleDeclarationsCommand(
+  scope: StyleScope,
+  target: StyleTarget,
+  priors: readonly PriorDeclaration[],
+  ruleId: StyleRuleId,
+): Command {
+  return {
+    kind: 'restoreStyleDeclarations',
+    label: `Restore ${priors.map((prior) => prior.property).join(', ')}`,
+    apply(state) {
+      const existing = findRule(state.project.styles, scope, target);
+      const forward: PriorDeclaration[] = priors.map(({ property }) => ({
+        property,
+        value: existing ? getDeclaration(existing.declarations, property) : undefined,
+      }));
+
+      let styles = state.project.styles;
+      for (const { property, value } of priors) {
+        styles =
+          value === undefined
+            ? unsetProperty(styles, scope, target, property)
+            : setProperty(styles, scope, target, property, value, fixedStyleRuleId(ruleId));
+      }
+
+      const next: EditorState = {
+        ...state,
+        project: { ...state.project, styles },
+      };
+      return succeed(next, restoreStyleDeclarationsCommand(scope, target, forward, ruleId));
+    },
+  };
+}
+
 /**
  * Remove one property from one (scope, target).
  *

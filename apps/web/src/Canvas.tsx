@@ -1,6 +1,7 @@
 import {
   compileStyleSheet,
   createBuiltinRegistry,
+  createIdFactory,
   getBreakpoint,
   rootNode,
   type NodeId,
@@ -14,7 +15,9 @@ import type { StoreApi } from 'zustand/vanilla';
 
 import { DropIndicator } from './DropIndicator.tsx';
 import { createDragController } from './dragController.ts';
+import { createResizeController } from './resizeController.ts';
 import { resolveDrop } from './resolveDrop.ts';
+import { ResizeHandles } from './ResizeHandles.tsx';
 import { SelectionLayer } from './SelectionLayer.tsx';
 
 /**
@@ -83,6 +86,7 @@ export function Canvas({ store }: CanvasProps) {
    */
   const [frameDoc, setFrameDoc] = useState<Document | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [resizing, setResizing] = useState(false);
   /** The gap a release would drop into, shown as the drop indicator. */
   const [dropHint, setDropHint] = useState<Drop | null>(null);
 
@@ -95,6 +99,15 @@ export function Canvas({ store }: CanvasProps) {
           if (!isDragging) setDropHint(null);
         },
       }),
+    [store],
+  );
+
+  /**
+   * The resize machine wired to the store. Its own `IdFactory` mints the one rule
+   * id a gesture may need, minted fresh per gesture inside the controller.
+   */
+  const resize = useMemo(
+    () => createResizeController(store, { ids: createIdFactory(), onResizingChange: setResizing }),
     [store],
   );
 
@@ -192,6 +205,16 @@ export function Canvas({ store }: CanvasProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [dragging, drag]);
 
+  /** Escape cancels an in-flight resize too, reverting the previewed size. */
+  useEffect(() => {
+    if (!resizing) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') resize.cancel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [resizing, resize]);
+
   /**
    * Capture the pointer for the drag, on the FRAME's root element — it received the
    * `pointerdown`, so it is the only element allowed to capture that pointer. This
@@ -243,6 +266,13 @@ export function Canvas({ store }: CanvasProps) {
           <RenderChildren tree={page.tree} env={env} />
         </CanvasFrame>
         <SelectionLayer store={store} doc={frameDoc} />
+        {/*
+          Resize grips sit over the selection. Hidden during a structural drag —
+          the box is moving then, and a resize is a different gesture on a settled
+          selection. A grip's own `pointerdown` stops propagation, so grabbing one
+          starts a resize instead of the drag a body press would.
+        */}
+        {!dragging && <ResizeHandles store={store} doc={frameDoc} controller={resize} />}
         <DropIndicator doc={frameDoc} tree={page.tree} drop={dropHint} />
         {dragging && (
           /*

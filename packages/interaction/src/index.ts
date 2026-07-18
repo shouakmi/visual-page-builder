@@ -5,3 +5,17 @@ export type { Point, Rect, DropAxis, DropChild, DropZone, Drop } from './dropTar
 /* Drag lifecycle — press, threshold, move, release/escape as a pure state machine. */
 export { dragStep, IDLE } from './dragMachine.ts';
 export type { DragState, DragInput, DragIntent, DragOptions, DragStep } from './dragMachine.ts';
+
+/* Resize geometry — how big a resize would make the box, as pure arithmetic on rectangles. */
+export { resizeSize } from './resizeGeometry.ts';
+export type { ResizeHandle, Size, ResizeConstraints } from './resizeGeometry.ts';
+
+/* Resize lifecycle — grab, threshold, move, release/escape as a pure state machine. */
+export { resizeStep, RESIZE_IDLE } from './resizeMachine.ts';
+export type {
+  ResizeState,
+  ResizeInput,
+  ResizeIntent,
+  ResizeOptions,
+  ResizeStep,
+} from './resizeMachine.ts';

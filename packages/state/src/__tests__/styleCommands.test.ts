@@ -27,7 +27,11 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { applyCommand, type Command, type EditorEnvironment } from '../command.ts';
-import { setStylePropertyCommand, unsetStylePropertyCommand } from '../commands/styleCommands.ts';
+import {
+  setStylePropertiesCommand,
+  setStylePropertyCommand,
+  unsetStylePropertyCommand,
+} from '../commands/styleCommands.ts';
 import { createEditorState, type EditorState } from '../editorState.ts';
 
 const registry = createBuiltinRegistry();
@@ -207,6 +211,178 @@ describe('setStylePropertyCommand', () => {
     expect(findRule(atMobile.project.styles, nodeScope(box), mobile)?.declarations.width).toEqual(
       px(50),
     );
+  });
+});
+
+describe('setStylePropertiesCommand', () => {
+  it('sets several properties on one target in a single command', () => {
+    const { state, box } = editorWithBox();
+    const { state: next } = run(
+      state,
+      setStylePropertiesCommand(
+        nodeScope(box),
+        base,
+        [
+          { property: 'width', value: px(120) },
+          { property: 'height', value: px(60) },
+        ],
+        ruleId('rule-1'),
+      ),
+    );
+
+    const rule = findRule(next.project.styles, nodeScope(box), base);
+    expect(rule?.id).toBe('rule-1');
+    expect(rule?.declarations).toEqual({ width: px(120), height: px(60) });
+    expect(validateStyleSheet(next.project.styles)).toEqual([]);
+  });
+
+  it('undoes BOTH properties as one entry — the corner-resize invariant', () => {
+    // A box with no explicit size, resized at a corner: one undo must return it to
+    // auto sizing, not leave one axis pinned. This is the whole reason the plural
+    // command exists instead of two singular ones.
+    const { state, box } = editorWithBox();
+    const { state: resized, inverse } = run(
+      state,
+      setStylePropertiesCommand(
+        nodeScope(box),
+        base,
+        [
+          { property: 'width', value: px(200) },
+          { property: 'height', value: px(100) },
+        ],
+        ruleId('rule-1'),
+      ),
+    );
+    expect(findRule(resized.project.styles, nodeScope(box), base)?.declarations).toEqual({
+      width: px(200),
+      height: px(100),
+    });
+
+    const { state: undone } = run(resized, inverse);
+    // Both gone: the rule had no other properties, so it is dropped entirely.
+    expect(findRule(undone.project.styles, nodeScope(box), base)).toBeUndefined();
+  });
+
+  it('undo restores prior values and unsets only the newly-added ones', () => {
+    // The box already has a width; a resize changes width and ADDS height. Undo
+    // must put width back to its old value AND remove the height it introduced.
+    const { state, box } = editorWithBox();
+    const { state: withWidth } = run(
+      state,
+      setStylePropertyCommand(nodeScope(box), base, 'width', px(100), ruleId('rule-1')),
+    );
+    const { state: resized, inverse } = run(
+      withWidth,
+      setStylePropertiesCommand(
+        nodeScope(box),
+        base,
+        [
+          { property: 'width', value: px(300) },
+          { property: 'height', value: px(150) },
+        ],
+        ruleId('rule-9'),
+      ),
+    );
+
+    const { state: undone } = run(resized, inverse);
+    expect(findRule(undone.project.styles, nodeScope(box), base)?.declarations).toEqual({
+      width: px(100),
+    });
+  });
+
+  it('redoes to the post-edit size — the original command re-applies cleanly', () => {
+    const { state, box } = editorWithBox();
+    const command = setStylePropertiesCommand(
+      nodeScope(box),
+      base,
+      [
+        { property: 'width', value: px(200) },
+        { property: 'height', value: px(100) },
+      ],
+      ruleId('rule-1'),
+    );
+    const { state: resized, inverse } = run(state, command);
+    const { state: undone } = run(resized, inverse);
+    // History's redo is the original command re-run against the undone state.
+    const { state: redone } = run(undone, command);
+
+    expect(findRule(redone.project.styles, nodeScope(box), base)?.declarations).toEqual({
+      width: px(200),
+      height: px(100),
+    });
+  });
+
+  it('refuses if any one property rejects its value, changing nothing', () => {
+    const { state, box } = editorWithBox();
+    const reason = refusalOf(
+      state,
+      setStylePropertiesCommand(
+        nodeScope(box),
+        base,
+        [
+          { property: 'width', value: px(100) },
+          { property: 'height', value: keyword('flex-start') },
+        ],
+        ruleId('rule-1'),
+      ),
+    );
+    expect(reason).toMatch(/does not accept/);
+    expect(findRule(state.project.styles, nodeScope(box), base)).toBeUndefined();
+  });
+
+  it('coalesces across a gesture on the same properties, but not a different set', () => {
+    const { box } = editorWithBox();
+    const a = setStylePropertiesCommand(
+      nodeScope(box),
+      base,
+      [
+        { property: 'width', value: px(100) },
+        { property: 'height', value: px(50) },
+      ],
+      ruleId('r'),
+    );
+    // Same properties, opposite order: still one gesture, so the key must match.
+    const b = setStylePropertiesCommand(
+      nodeScope(box),
+      base,
+      [
+        { property: 'height', value: px(60) },
+        { property: 'width', value: px(110) },
+      ],
+      ruleId('r'),
+    );
+    const widthOnly = setStylePropertiesCommand(
+      nodeScope(box),
+      base,
+      [{ property: 'width', value: px(120) }],
+      ruleId('r'),
+    );
+
+    expect(a.coalesceKey).toBe(b.coalesceKey);
+    expect(a.coalesceKey).not.toBe(widthOnly.coalesceKey);
+  });
+
+  it('writes the target it is given — a mobile resize does not touch base', () => {
+    const { state, box } = editorWithBox();
+    const mobile = target(MOBILE_BREAKPOINT_ID);
+    const { state: next } = run(
+      state,
+      setStylePropertiesCommand(
+        nodeScope(box),
+        mobile,
+        [
+          { property: 'width', value: px(50) },
+          { property: 'height', value: px(25) },
+        ],
+        ruleId('rule-1'),
+      ),
+    );
+
+    expect(findRule(next.project.styles, nodeScope(box), base)).toBeUndefined();
+    expect(findRule(next.project.styles, nodeScope(box), mobile)?.declarations).toEqual({
+      width: px(50),
+      height: px(25),
+    });
   });
 });
 

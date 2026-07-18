@@ -34,7 +34,12 @@ export {
 } from './commands/nodeCommands.ts';
 export type { CommandPlan } from './commands/nodeCommands.ts';
 
-export { setStylePropertyCommand, unsetStylePropertyCommand } from './commands/styleCommands.ts';
+export {
+  setStylePropertyCommand,
+  setStylePropertiesCommand,
+  unsetStylePropertyCommand,
+} from './commands/styleCommands.ts';
+export type { StyleDeclarationInput } from './commands/styleCommands.ts';
 
 export {
   setNodePropCommand,

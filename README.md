@@ -15,10 +15,14 @@ An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web
 > store integration (`dragController`, which previews the move on `present` and commits it on release) —
 > plus the DOM adapter that measures the page (`resolveDrop`: `elementFromPoint` → nearest handle →
 > child rects → validity guard → `dropTarget`), pointer capture so a drag survives leaving the iframe,
-> and a live drop-indicator line (`DropIndicator`). The adapter and pointer wiring are verified with
-> stubbed-layout tests (jsdom lays nothing out) and a 6-mutation set. The canvas renders through **the
-> same compiler the export will call**, so what you see is what Phase I ships. See the
-> [Roadmap](#roadmap).
+> and a live drop-indicator line (`DropIndicator`). **Resize (E3) is complete too**: eight grips on the
+> selection drive the same shape — headless geometry (`resizeSize`: which edge grows, the min-size
+> clamp, the aspect lock) and lifecycle (`resizeMachine`) in `@vpb/interaction`, a `resizeController`
+> that previews width/height on the active breakpoint and commits on release, and a
+> `setStylePropertiesCommand` so a corner resize (width AND height) is ONE undo entry. Every
+> browser-facing piece across E2–E3 is verified with stubbed-layout tests (jsdom lays nothing out) and
+> a mutation set. The canvas renders through **the same compiler the export will call**, so what you
+> see is what Phase I ships. See the [Roadmap](#roadmap).
 
 See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
 [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
@@ -71,7 +75,7 @@ packages/
     document/                         pages, project, asset library
   state/                @vpb/state  — the edit layer: commands, history, store. No React, no DOM.
     editorState.ts                    the document + where the user is in it
-  interaction/          @vpb/interaction — drag geometry (dropTarget) + lifecycle (dragMachine). Headless (E2)
+  interaction/          @vpb/interaction — drag + resize geometry and lifecycle machines. Headless (E2, E3)
   renderer/             @vpb/renderer — the node tree as escaped React, in a sandboxed iframe (D2/D3)
   tokens/               @vpb/tokens — design tokens: palette, semantic scale, theme.css
   ui/                   @vpb/ui     — design system: theming, primitives, app shell
@@ -274,15 +278,15 @@ One runner, four projects, each with the environment it needs (`vitest.config.ts
 | Project    | Environment | Covers                                                  | Status          |
 | ---------- | ----------- | ------------------------------------------------------- | --------------- |
 | `core`     | node        | The model: style, cascade, compiler, tree, document     | 527 tests       |
-| `state`    | node        | Commands, inverses, history, the store                  | 157 tests       |
-| `interaction` | node     | Drag geometry (`dropTarget`) + the drag state machine    | 23 tests        |
+| `state`    | node        | Commands, inverses, history, the store                  | 164 tests       |
+| `interaction` | node     | Drag + resize geometry and state machines                | 43 tests        |
 | `renderer` | jsdom       | Escaped rendering, the sandboxed frame, the hit-test handle | 52 tests     |
 | `tokens`   | node        | Token contract, CSS/TS parity, colour distinction       | 48 tests        |
 | `ui`       | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard      | 34 tests        |
-| `web`      | jsdom       | Canvas wiring (D4), selection (E1), the drag controller + DOM adapter (E2) | 37 tests |
+| `web`      | jsdom       | Canvas wiring (D4), selection (E1), drag (E2) + resize (E3) controllers | 48 tests |
 
 ```bash
-pnpm test                        # everything (878 today)
+pnpm test                        # everything (916 today)
 pnpm vitest run --project core   # one project
 ```
 
@@ -314,14 +318,18 @@ pnpm mutate --list         # show what would run, change nothing
 pnpm mutate --filter cycle # one mutation by name
 ```
 
-Every phase is built this way; **139 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
+Every phase is built this way; **153 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
 C, 12 for D1, 12 for D2 (the renderer: escaping, `isSafeUrl`, the `componentId -> React` map), 9 for D3
 (the sandboxed frame: the `sandbox` attribute, incremental reconciliation), 8 for D4 (the app wiring:
 `present` vs `committed`, the active page, the per-page node filter, device sizing), 7 for E1 (the
-hit-test handle, the click→node walk, multi-select, the overlay), and 18 for E2 (drag geometry: axis,
+hit-test handle, the click→node walk, multi-select, the overlay), 18 for E2 (drag geometry: axis,
 before/after boundary, index; the machine: threshold, commit-on-release, cancel-on-escape; the
 controller: preview, commit-vs-cancel; and the app adapter/wiring: the display-vs-`flex-direction` axis
-read, container drops, the validity guard, pointer capture, the drop-indicator target, escape-cancels).
+read, container drops, the validity guard, pointer capture, the drop-indicator target, escape-cancels),
+and 14 for E3 (resize geometry: the min clamp, the edge direction, the axis, the aspect lock; the
+machine: threshold, commit-on-release, escape-cancel; the plural command: the coalesce key, unset-on-
+undo; the controller: width+height, commit, cancel-vs-commit, active-vs-base breakpoint; the grips:
+the transposed start size).
 
 Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
 their first run, which proves only that they were written against code that already passed them.
@@ -405,7 +413,7 @@ the code still compiles and the tests still pass — which is precisely why it i
 | **B3** | **Document — node tree + index, component registry, page/project. ✅**          |
 | **C**  | **Commands, inverse-command history, Zustand store — headless and testable. ✅** |
 | **D**  | **Renderer + style compiler + sandboxed canvas, wired into the app; the shared-compiler WYSIWYG invariant. ✅ Done.** |
-| E     | Interaction: overlay, structural drag, resize, multi-select, snap guides. **Selection (E1) ✅; structural drag (E2) ✅ — decision layer + DOM adapter, pointer capture, drop indicator** |
+| E     | Interaction: overlay, structural drag, resize, multi-select, snap guides. **Selection (E1) ✅; structural drag (E2) ✅; resize (E3) ✅ — grips → width/height on the active breakpoint, one undo per gesture. Multi-select ops (E4) + snap guides (E5) remain** |
 | F     | Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets  |
 | G     | HTML/CSS importer — the validator of the Phase B model                      |
 | H     | Style panel + component library                                             |

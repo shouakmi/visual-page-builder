@@ -10,29 +10,30 @@ the news.
 
 ## Where we are
 
-**Phases A–D complete; Phase E underway — E1 done and E2 (structural drag) now COMPLETE.** Click to
-select, shift/ctrl to multi-select, a tracking overlay. Drag: `dropTarget` (where), `dragMachine`
-(when), `dragController` (previews the move on `present`, commits on release), and the DOM adapter that
-measures the page (`resolveDrop`: `elementFromPoint` → nearest handle → child rects → validity guard →
-`dropTarget`), pointer capture so a drag survives leaving the iframe, and a live `DropIndicator` line.
-The adapter and pointer wiring cannot be observed on-screen in this environment (jsdom has no layout;
-the Browser pane never paints — memory `browser-pane-tabs-never-paint`), so they are pinned by
-**stubbed-layout tests** that feed known rects/hit-tests and by the 6-mutation `e2-app` set. E3
-(resize) is next. See the Phase E section.
+**Phases A–D complete; Phase E underway — E1, E2 (structural drag), and E3 (resize) all COMPLETE.**
+Click to select, shift/ctrl to multi-select, a tracking overlay. Drag: `dropTarget` (where),
+`dragMachine` (when), `dragController` + the `resolveDrop` DOM adapter, pointer capture, a live
+`DropIndicator`. Resize: eight `ResizeHandles` grips → `resizeSize` (how big: edge direction, min
+clamp, aspect lock) + `resizeMachine` (when) → `resizeController`, which previews width/height on the
+active breakpoint via `setStylePropertiesCommand` (one undo entry for a corner's width AND height) and
+commits on release. The browser-facing pieces cannot be observed on-screen in this environment (jsdom
+has no layout; the Browser pane never paints — memory `browser-pane-tabs-never-paint`), so they are
+pinned by **stubbed-layout tests** that feed known rects and by the `e2-app`/`e3-resize` mutation sets.
+E4 (multi-select ops + batching) is next. See the Phase E section.
 
 | | |
 | --- | --- |
-| Last session | 2026-07-18 — E2 finished: the DOM adapter (`resolveDrop`), pointer capture + `DropIndicator` in `Canvas`, stubbed-layout drag tests, and the `e2-app` mutation set |
-| Git | branch **`phase-c`**, **20 commits** ahead of `main` @ `6da69ce`; HEAD is `11b4935` — the E2 app-slice commit (`resolveDrop` + pointer capture + `DropIndicator` + `e2-app` mutations), parent `da75075`. **Not pushed, not merged.** Rename to `phase-e` or merge. |
-| Working tree | Clean (E2 app slice + these doc updates committed) |
-| `pnpm verify` | Test/mutate legs green — **878 tests across 37 files** (re-run 2026-07-18) |
-| `pnpm mutate` | Green — **139/139 caught** (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18) |
+| Last session | 2026-07-18 — E3 shipped: `resizeGeometry` + `resizeMachine` (`@vpb/interaction`), `setStylePropertiesCommand` (`@vpb/state`), `resizeController` + `ResizeHandles` (`apps/web`), tests, and the `e3-resize` mutation set |
+| Git | branch **`phase-c`**, ahead of `main` @ `6da69ce`; the E3 commit sits on top of `11b4935` (E2 app slice) — see the hash below once committed. **Not pushed, not merged.** Rename to `phase-e` or merge. |
+| Working tree | Clean (E3 + these doc updates committed) |
+| `pnpm verify` | Green — typecheck, lint, encoding, **916 tests across 41 files**, build (re-run 2026-07-18) |
+| `pnpm mutate` | Green — **153/153 caught** (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14) |
 
-Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), **E1** (selection + overlay), and all
-of **E2** (structural drag — decision layer + DOM adapter + pointer capture + drop indicator).
+Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), **E1** (selection + overlay), all of
+**E2** (structural drag), and all of **E3** (resize — geometry + machine + plural command + grips).
 
-> Test counts by project: `core` 527, `state` 157, `interaction` 23, `renderer` 52, `tokens` 48,
-> `ui` 34, `web` 37 = 878.
+> Test counts by project: `core` 527, `state` 164, `interaction` 43, `renderer` 52, `tokens` 48,
+> `ui` 34, `web` 48 = 916.
 >
 > The branch is still named `phase-c` and now carries all of D and the start of E. Rename or merge
 > before it gets confusing.
@@ -212,10 +213,10 @@ These items are still deferred as noted; none of them blocks Phase E.
 
 ## Phase E — where it stands
 
-**Underway. E1 (selection + overlay) is done; E2 (structural drag) is COMPLETE — decision layer + DOM
-adapter + pointer capture + drop indicator; E3–E5 are not built.** The full plan is in
-`C:\Users\hp\.claude\plans\rustling-toasting-badger.md` (or ask for it) — it designs all of E and the
-architecture that holds across it. The load-bearing decisions, so nobody reverses them:
+**Underway. E1 (selection + overlay), E2 (structural drag), and E3 (resize) are all COMPLETE; E4–E5
+are not built.** The full plan is in `C:\Users\hp\.claude\plans\rustling-toasting-badger.md` (or ask for
+it) — it designs all of E and the architecture that holds across it. The load-bearing decisions, so
+nobody reverses them:
 
 - **DOM → NodeId is a dedicated `data-vpb-node-id` attribute, NOT the `n-<id>` styling class.** Stamped
   centrally in `renderNode` (`packages/renderer/src/RenderTree.tsx`) via `cloneElement`, so every
@@ -298,10 +299,43 @@ pinned by stubbed-layout tests + mutations, but nothing has watched a real point
 on screen and commit exactly one undo entry in this environment. Do that opportunistically; it is a
 confidence check on already-tested code, not a gap in coverage.
 
+### What E3 shipped (resize — same split as drag)
+
+Eight grips on the selected box, driving the same brain/adapter split. Everything but the one
+`getBoundingClientRect` at grab time is verified without a browser.
+
+- `packages/interaction/src/resizeGeometry.ts` — `resizeSize(start, handle, delta, constraints) → Size`.
+  Pure arithmetic: signed per-handle factors turn "pointer moved right/down" into which edge grew, the
+  aspect lock ties the two axes (width drives a corner, the driven axis drives a side), and the min
+  clamp is last so a box drags small but never past the floor that keeps it selectable. **v1 is
+  width/height only** — in flow layout the box's top-left is layout-determined, so there is no
+  `left`/`top` to write; absolute-position resize is a later refinement, as into-container drops were
+  for E2. 9 tests.
+- `packages/interaction/src/resizeMachine.ts` — `resizeStep(state, input, {threshold, minWidth,
+  minHeight}) → {state, intent}`, mirroring `dragMachine`: `idle → pending → resizing`, threshold, and
+  `preview`/`commit`/`cancel` intents. Unlike drag it owns the size math (`resizeSize` needs no DOM), so
+  the controller stays trivial. 11 tests.
+- `packages/state/src/commands/styleCommands.ts` — `setStylePropertiesCommand(scope, target,
+  declarations, ruleId)`: sets SEVERAL properties on one (scope, target) as ONE entry, so a corner's
+  width AND height are one undo. Its inverse restores each to its prior value, `unset` included. This is
+  the minimal answer to "one gesture, one entry"; E4's `batchCommand` (across nodes) is the general one.
+  Coalesce key includes the sorted property set, so a width-only gesture does not merge into a
+  width+height one. 7 tests.
+- `apps/web/src/resizeController.ts` — `createResizeController(store, {ids, onResizingChange})`. Turns
+  intents into `preview(setStylePropertiesCommand(...))` on the **active breakpoint** and `commitPreview`
+  on release. Mints ONE rule id per gesture at `down` (reusing one across gestures on different nodes
+  would stamp two rules with the same identity). 6 tests against a REAL store, no DOM.
+- `apps/web/src/ResizeHandles.tsx` — the grips in the editor overlay (`pointer-events-auto`, so a grab
+  does not fall through to the frame's selection/drag). Single selection only in v1. Measures the start
+  size at grab time and takes pointer capture on the grip. Covered by `ResizeHandles.test.tsx`.
+- `tools/mutations/e3-resize.mjs` — 14 mutations across all four files, all caught (geometry: min clamp,
+  edge direction, axis, aspect; machine: threshold, commit, escape; command: coalesce key, unset-on-undo;
+  controller: width+height, commit, cancel-vs-commit, active-vs-base breakpoint; grips: transposed start).
+
+On-screen confirmation of a real resize is owed opportunistically, on the same terms as E2's drag.
+
 ### Still to do in Phase E (sequenced)
 
-- **E3 — resize.** Overlay handles → `preview(setStylePropertyCommand)` width/height on the active
-  breakpoint/state → commit on release.
 - **E4 — multi-select ops + batching.** `batchCommand` composite in `@vpb/state` (the answer to AUDIT
   §5.3's "no transaction/batching"; a transaction in an inverse-command history IS a composite with a
   combined inverse) — delete/move all selected as one history entry. Keyboard shortcuts (Delete,
