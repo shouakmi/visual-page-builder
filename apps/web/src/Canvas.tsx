@@ -6,11 +6,13 @@ import {
   type NodeId,
 } from '@vpb/core';
 import { CanvasFrame, RenderChildren, classNameFor, createBuiltinRenderers } from '@vpb/renderer';
+import type { Drop } from '@vpb/interaction';
 import { activePage, type EditorState, type EditorStore } from '@vpb/state';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 
+import { DropIndicator } from './DropIndicator.tsx';
 import { createDragController } from './dragController.ts';
 import { resolveDrop } from './resolveDrop.ts';
 import { SelectionLayer } from './SelectionLayer.tsx';
@@ -81,10 +83,18 @@ export function Canvas({ store }: CanvasProps) {
    */
   const [frameDoc, setFrameDoc] = useState<Document | null>(null);
   const [dragging, setDragging] = useState(false);
+  /** The gap a release would drop into, shown as the drop indicator. */
+  const [dropHint, setDropHint] = useState<Drop | null>(null);
 
   /** The drag machine wired to the store. Rebuilt only if the store changes. */
   const drag = useMemo(
-    () => createDragController(store, { onDraggingChange: setDragging }),
+    () =>
+      createDragController(store, {
+        onDraggingChange: (isDragging) => {
+          setDragging(isDragging);
+          if (!isDragging) setDropHint(null);
+        },
+      }),
     [store],
   );
 
@@ -92,11 +102,12 @@ export function Canvas({ store }: CanvasProps) {
    * Live values for the pointer handlers, so the listeners bind ONCE per frame
    * document rather than re-attaching on every edit (which would drop an in-flight
    * drag). `treeRef` is what `resolveDrop` measures against; `draggedIdRef` is the
-   * node the press armed.
+   * node the press armed; `pointerIdRef` is the pointer to capture for the drag.
    */
   const treeRef = useRef(page.tree);
   treeRef.current = page.tree;
   const draggedIdRef = useRef<NodeId | null>(null);
+  const pointerIdRef = useRef<number | null>(null);
 
   /**
    * Click to select, press-and-drag to move. The overlay above the frame is
@@ -132,14 +143,15 @@ export function Canvas({ store }: CanvasProps) {
       }
       armed = true;
       draggedIdRef.current = id;
+      pointerIdRef.current = event.pointerId;
       drag.down(id, { x: event.clientX, y: event.clientY });
     };
 
     /*
-     * ⚠️ BROWSER-PENDING glue — see resolveDrop.ts. The DECISION (threshold,
-     * preview, commit) lives in the tested controller; this only feeds it a
-     * pointer and, once dragging, a resolved drop. Following the pointer OUT of the
-     * iframe mid-drag needs pointer capture, the browser-specific piece still to do.
+     * The DECISION (threshold, preview, commit) lives in the tested controller and
+     * `resolveDrop`; this only measures a pointer into a drop and shows it. Pointer
+     * capture (below) keeps these frame-document events flowing even when the
+     * pointer leaves the iframe — the ⚠️ browser-pending behaviour to confirm.
      */
     const onPointerMove = (event: PointerEvent) => {
       if (!armed) return;
@@ -150,11 +162,13 @@ export function Canvas({ store }: CanvasProps) {
           ? resolveDrop({ doc: frameDoc, tree: treeRef.current, registry, draggedId, pointer })
           : null;
       drag.move(pointer, drop);
+      if (drag.isDragging()) setDropHint(drop);
     };
 
     const onPointerUp = () => {
       if (!armed) return;
       armed = false;
+      pointerIdRef.current = null;
       drag.up();
     };
 
@@ -177,6 +191,34 @@ export function Canvas({ store }: CanvasProps) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [dragging, drag]);
+
+  /**
+   * Capture the pointer for the drag, on the FRAME's root element — it received the
+   * `pointerdown`, so it is the only element allowed to capture that pointer. This
+   * is what keeps `pointermove`/`pointerup` arriving at the frame document once the
+   * cursor leaves the iframe, and it is the §4.1 fix: the prototype's drag stalled
+   * the instant the pointer crossed into the frame. `try/catch` because a pointer
+   * can already be gone (a synthetic event, a release that raced the effect), and
+   * the drag must not throw on the way up. ⚠️ Verify in a real browser.
+   */
+  useEffect(() => {
+    if (!dragging || !frameDoc) return;
+    const root = frameDoc.documentElement;
+    const pointerId = pointerIdRef.current;
+    try {
+      if (pointerId !== null) root.setPointerCapture(pointerId);
+    } catch {
+      // The pointer is no longer capturable; the drag still works while it is over
+      // the frame, which is the common case.
+    }
+    return () => {
+      try {
+        if (pointerId !== null) root.releasePointerCapture(pointerId);
+      } catch {
+        // Already released (e.g. by pointerup); nothing to do.
+      }
+    };
+  }, [dragging, frameDoc]);
 
   return (
     <div className="flex h-full justify-center overflow-auto bg-surface-sunken p-6">
@@ -201,14 +243,16 @@ export function Canvas({ store }: CanvasProps) {
           <RenderChildren tree={page.tree} env={env} />
         </CanvasFrame>
         <SelectionLayer store={store} doc={frameDoc} />
+        <DropIndicator doc={frameDoc} tree={page.tree} drop={dropHint} />
         {dragging && (
           /*
-            ⚠️ BROWSER-PENDING — the drag shield. `pointer-events-none` for now so it
-            does not steal the events the frame-document listeners rely on; giving it
-            pointer capture (to keep the drag alive off the iframe and show a grabbing
-            cursor) is the browser-specific step still to finish.
+            The drag shield. `pointer-events-none` so it does not intercept the
+            frame-document events the drag relies on — pointer CAPTURE (above), not
+            the shield, is what keeps those events flowing off the iframe. The shield
+            is the visual layer: it shows the grabbing cursor for the whole drag,
+            including over the editor chrome, where the frame's cursor cannot reach.
           */
-          <div className="pointer-events-none absolute inset-0 z-10" aria-hidden />
+          <div className="absolute inset-0 z-10 cursor-grabbing" aria-hidden />
         )}
       </div>
     </div>
