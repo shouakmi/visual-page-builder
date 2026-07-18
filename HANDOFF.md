@@ -23,7 +23,7 @@ the Browser pane never paints — memory `browser-pane-tabs-never-paint`), so th
 | | |
 | --- | --- |
 | Last session | 2026-07-18 — E2 finished: the DOM adapter (`resolveDrop`), pointer capture + `DropIndicator` in `Canvas`, stubbed-layout drag tests, and the `e2-app` mutation set |
-| Git | branch **`phase-c`**, **20 commits** ahead of `main` @ `6da69ce`; HEAD is the E2 app-slice commit (`resolveDrop` + pointer capture + `DropIndicator` + `e2-app` mutations), parent `da75075`. **Not pushed, not merged.** Rename to `phase-e` or merge. |
+| Git | branch **`phase-c`**, **20 commits** ahead of `main` @ `6da69ce`; HEAD is `11b4935` — the E2 app-slice commit (`resolveDrop` + pointer capture + `DropIndicator` + `e2-app` mutations), parent `da75075`. **Not pushed, not merged.** Rename to `phase-e` or merge. |
 | Working tree | Clean (E2 app slice + these doc updates committed) |
 | `pnpm verify` | Test/mutate legs green — **878 tests across 37 files** (re-run 2026-07-18) |
 | `pnpm mutate` | Green — **139/139 caught** (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18) |
