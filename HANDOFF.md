@@ -156,6 +156,16 @@ runs in **node**, making "headless" a build gate rather than a promise.
   to four `@vpb/core` files during B3. `pnpm encoding:check` gates it; `pnpm encoding:fix` reverses it.
 - **On this Windows box, Node is not on the shell's `PATH`** until refreshed from the Machine scope:
   `$env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")`.
+- **A mutation set's `testCommand` uses exactly ONE `--project`, and every `find` is a single line.**
+  E3 first shipped as one file whose `testCommand` repeated the flag
+  (`--project interaction --project state --project web`); that form is non-standard here (every E2 set
+  scopes to one project) and parses differently across vitest builds — where it matches zero projects it
+  runs zero tests, the baseline still reads "green", and **every mutation then "survives"**. Split E3
+  into `e3-resize` (interaction), `e3-command` (state), `e3-app` (web), one `--project` each. Separately,
+  the harness reads the working tree verbatim, so a `find` that spans lines with `\n` goes STALE on a
+  CRLF checkout — keep every `find` single-line, and `.gitattributes` now pins LF so checkouts stop
+  flipping. If a mutation run ever reports a whole set surviving, suspect the `testCommand` ran no tests
+  before you suspect the tests.
 - No `any` (lint-enforced). No placeholder implementations. Comments explain *why*.
 - Tests live in `__tests__/` beside the code and are picked up by `src/**/*.test.{ts,tsx}`.
 - Adding a package with Tailwind classes? Add it to `@source` in `apps/web/src/styles.css` or its
@@ -328,9 +338,11 @@ Eight grips on the selected box, driving the same brain/adapter split. Everythin
 - `apps/web/src/ResizeHandles.tsx` — the grips in the editor overlay (`pointer-events-auto`, so a grab
   does not fall through to the frame's selection/drag). Single selection only in v1. Measures the start
   size at grab time and takes pointer capture on the grip. Covered by `ResizeHandles.test.tsx`.
-- `tools/mutations/e3-resize.mjs` — 14 mutations across all four files, all caught (geometry: min clamp,
-  edge direction, axis, aspect; machine: threshold, commit, escape; command: coalesce key, unset-on-undo;
-  controller: width+height, commit, cancel-vs-commit, active-vs-base breakpoint; grips: transposed start).
+- `tools/mutations/e3-resize.mjs` (interaction, 7), `e3-command.mjs` (state, 2), `e3-app.mjs` (web, 5)
+  — 14 mutations, all caught. One `--project` per file, single-line `find`s (see Conventions that bite).
+  Geometry: min clamp, edge direction, axis, aspect; machine: threshold, commit, escape; command:
+  coalesce key, unset-on-undo; controller: width+height, commit, cancel-vs-commit, active-vs-base
+  breakpoint; grips: transposed start.
 
 On-screen confirmation of a real resize is owed opportunistically, on the same terms as E2's drag.
 

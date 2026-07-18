@@ -77,6 +77,24 @@ function fixedStyleRuleId(id: StyleRuleId): IdFactory {
 }
 
 /**
+ * The reason the first declaration that rejects its value gives, or null when they
+ * all accept.
+ *
+ * ONE home for the guard on purpose: `setStyleProperty` and `setStyleProperties`
+ * validate identically, and two textually-identical `if (!acceptsValue(...))` lines
+ * made the check ambiguous to the mutation harness (its `find` matched both). A
+ * single helper keeps the guard, and the mutation that removes it, in one place.
+ */
+function rejectedValue(declarations: readonly StyleDeclarationInput[]): string | null {
+  for (const { property, value } of declarations) {
+    if (!acceptsValue(property, value)) {
+      return `${property} does not accept a ${value.kind} value.`;
+    }
+  }
+  return null;
+}
+
+/**
  * Set one property on one (scope, target).
  *
  * `ruleId` is consumed only if no rule exists for that scope and target yet;
@@ -95,9 +113,8 @@ export function setStylePropertyCommand(
     label: `Set ${property}`,
     coalesceKey: styleCoalesceKey(scope, target, property),
     apply(state) {
-      if (!acceptsValue(property, value)) {
-        return refuse(`${property} does not accept a ${value.kind} value.`);
-      }
+      const rejection = rejectedValue([{ property, value }]);
+      if (rejection) return refuse(rejection);
 
       const styles = state.project.styles;
       const existing = findRule(styles, scope, target);
@@ -190,11 +207,8 @@ export function setStylePropertiesCommand(
     label: `Set ${declarations.map((declaration) => declaration.property).join(', ')}`,
     coalesceKey: stylePropertiesCoalesceKey(scope, target, declarations),
     apply(state) {
-      for (const { property, value } of declarations) {
-        if (!acceptsValue(property, value)) {
-          return refuse(`${property} does not accept a ${value.kind} value.`);
-        }
-      }
+      const rejection = rejectedValue(declarations);
+      if (rejection) return refuse(rejection);
 
       // Read every prior value BEFORE any write — one `setProperty` can create the
       // rule the next one reads, so the pre-edit picture only exists up front.

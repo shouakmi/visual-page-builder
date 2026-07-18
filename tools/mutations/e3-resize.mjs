@@ -1,21 +1,21 @@
 /**
- * PHASE E3 — resize.
+ * PHASE E3 — resize geometry + machine (the headless brain).
  *
- * The same split as drag: a headless brain (`resizeGeometry` how big,
- * `resizeMachine` when) and a thin, browser-pending adapter (`resizeController`
- * wired to the store, `ResizeHandles` the grips). Each mutation is a way a resize
- * looks alive while landing wrong — the wrong edge grows, the untouched axis moves,
- * a box shrinks past the floor, the size never commits, a mobile resize writes base.
+ * `resizeSize` decides how big, `resizeMachine` decides when. Pure, no DOM, so this
+ * set runs against the `interaction` project alone — the same scoping every E2 set
+ * uses (one `--project` per file). Each mutation is a way a resize looks alive while
+ * landing wrong: the wrong edge grows, the untouched axis moves, a box shrinks past
+ * the floor, the aspect lock distorts, a click on a handle commits as an edit.
  *
- * The set spans three projects, so its `testCommand` runs all three; every mutation
- * is caught by a test that runs the resolved size through the real store or the
- * pure geometry.
+ * Every `find` is a SINGLE line — no `\n` — so the patterns match whether the
+ * working tree has LF or CRLF endings (`.gitattributes` pins LF, but the patterns do
+ * not depend on it).
  */
 export default {
-  name: 'E3 — resize (geometry + machine + controller + grips)',
-  testCommand: 'pnpm vitest run --project interaction --project state --project web --silent',
+  name: 'E3 — resize geometry + machine',
+  testCommand: 'pnpm vitest run --project interaction --silent',
   mutations: [
-    /* ---- resizeGeometry: how big --------------------------------------- */
+    /* ---- resizeGeometry: how big -------------------------------------- */
     {
       // The floor keeps a box selectable. Drop the clamp and a box drags to zero
       // and past it, into negative width — unclickable, unrecoverable.
@@ -49,7 +49,7 @@ export default {
       replace: '    if (hx !== 0) height = width * constraints.aspectRatio;',
     },
 
-    /* ---- resizeMachine: when ------------------------------------------- */
+    /* ---- resizeMachine: when ------------------------------------------ */
     {
       // A grab one pixel short of the threshold must not resize. Loosen `>=` to `>`
       // and a resize exactly at the threshold silently fails to start.
@@ -60,81 +60,20 @@ export default {
     },
     {
       // Release must commit the previewed size. Drop the commit and every resize
-      // reverts on release — the size never reaches history.
+      // reverts on release — the size never reaches history. (`{ type: 'commit' }`
+      // is unique to the `up` case, so this one line is unambiguous.)
       name: 'release no longer commits the resize',
       file: 'packages/interaction/src/resizeMachine.ts',
       find: "        intent: state.phase === 'resizing' ? { type: 'commit' } : { type: 'none' },",
       replace: "        intent: { type: 'none' },",
     },
     {
-      // Escape must revert the preview. The `down` case carries the same ternary, so
-      // the `RESIZE_IDLE` line disambiguates this as the cancel case specifically.
+      // Escape must revert the preview. Short-circuit the cancel case to a no-op and
+      // Escape leaves the half-finished resize on screen, uncommitted and stuck.
       name: 'escape no longer cancels the resize',
       file: 'packages/interaction/src/resizeMachine.ts',
-      find: "        state: RESIZE_IDLE,\n        intent: state.phase === 'resizing' ? { type: 'cancel' } : { type: 'none' },",
-      replace: "        state: RESIZE_IDLE,\n        intent: { type: 'none' },",
-    },
-
-    /* ---- setStylePropertiesCommand: one entry -------------------------- */
-    {
-      // The properties are what make one gesture's key distinct from another's. Drop
-      // them and a width-only resize coalesces into a preceding width+height one.
-      name: 'the coalesce key forgets which properties are edited',
-      file: 'packages/state/src/commands/styleCommands.ts',
-      find: '  return `setStyleProperties:${scopeKey(scope)}:${targetKey(target)}:${properties}`;',
-      replace: '  return `setStyleProperties:${scopeKey(scope)}:${targetKey(target)}`;',
-    },
-    {
-      // Undoing a resize must UNSET a property it newly added, not leave it. Leave it
-      // and undoing a corner resize on an auto-sized box strands one axis pinned.
-      name: 'undo does not unset a newly-added property',
-      file: 'packages/state/src/commands/styleCommands.ts',
-      find: '          value === undefined\n            ? unsetProperty(styles, scope, target, property)',
-      replace: '          value === undefined\n            ? styles',
-    },
-
-    /* ---- resizeController: the store integration ----------------------- */
-    {
-      // A corner resize sets width AND height as one entry. Drop the height and the
-      // box only ever changes width — half a resize.
-      name: 'the resize sets width but not height',
-      file: 'apps/web/src/resizeController.ts',
-      find: "\n              { property: 'height', value: px(intent.size.height) },",
-      replace: '',
-    },
-    {
-      // Release must commit. Swallow the commit and the resize reverts on mouse-up —
-      // the size is previewed, then lost.
-      name: 'the controller never commits the resize',
-      file: 'apps/web/src/resizeController.ts',
-      find: '        store.getState().commitPreview();',
-      replace: '        void 0;',
-    },
-    {
-      // Escape/invalid must cancel. Commit instead and Escape makes the half-finished
-      // size final, the opposite of revert.
-      name: 'the controller commits on cancel instead of reverting',
-      file: 'apps/web/src/resizeController.ts',
-      find: '        store.getState().cancelPreview();',
-      replace: '        store.getState().commitPreview();',
-    },
-    {
-      // The resize writes the ACTIVE breakpoint's target. Hardcode base and a resize
-      // while emulating mobile writes the base rule — the WYSIWYG hole D4 closed.
-      name: 'the resize writes base instead of the active breakpoint',
-      file: 'apps/web/src/resizeController.ts',
-      find: 'styleTarget(breakpoint)',
-      replace: "styleTarget('base')",
-    },
-
-    /* ---- ResizeHandles: the grips ------------------------------------- */
-    {
-      // The start size is the element's real width/height. Swap them and every resize
-      // starts from a transposed box, so the very first preview is already wrong.
-      name: 'the grabbed start size transposes width and height',
-      file: 'apps/web/src/ResizeHandles.tsx',
-      find: '    const start: Size = { width: rect.width, height: rect.height };',
-      replace: '    const start: Size = { width: rect.height, height: rect.width };',
+      find: "    case 'cancel':",
+      replace: "    case 'cancel':\n      return { state, intent: { type: 'none' } };",
     },
   ],
 };

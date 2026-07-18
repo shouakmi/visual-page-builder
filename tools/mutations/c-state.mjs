@@ -143,8 +143,8 @@ export default {
     {
       name: 'style command accepts a value the property rejects',
       file: 'packages/state/src/commands/styleCommands.ts',
-      find: '      if (!acceptsValue(property, value)) {',
-      replace: '      if (false) {',
+      find: '    if (!acceptsValue(property, value)) {',
+      replace: '    if (false) {',
     },
     {
       // A coalesce key that ignores the breakpoint merges a desktop edit with a
