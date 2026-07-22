@@ -2,11 +2,13 @@ import type { IdFactory, Node, NodeId, NodeTree, Page, Project, StyleRule } from
 import {
   canDropNode,
   canInsertComponent,
+  childIdsOf,
   duplicateNode,
   getComponent,
   getNode,
   insertNode,
   insertSubtree,
+  isAncestor,
   moveNode,
   nodeScope,
   parentIdOf,
@@ -20,6 +22,7 @@ import {
   updatePageBy,
 } from '@vpb/core';
 
+import { batchCommand } from './batch.ts';
 import type { Command, CommandRefusal, EditorEnvironment } from '../command.ts';
 import { refuse, succeed } from '../command.ts';
 import { activePage, select, type EditorState } from '../editorState.ts';
@@ -392,4 +395,108 @@ function preMoveIndexFor(tree: NodeTree, id: NodeId, parentId: NodeId, finalInde
   if (parentIdOf(tree, id) !== parentId) return finalIndex;
   const currentIndex = siblingIndex(tree, id);
   return finalIndex >= currentIndex ? finalIndex + 1 : finalIndex;
+}
+
+/* ----------------------------------------------- multi-node (Phase E4) */
+
+/**
+ * The ids with any node that is a DESCENDANT of another in the list dropped.
+ *
+ * Deleting a parent already deletes its children, so a selection holding both would
+ * ask to remove the child twice — the second removal refuses ("not in the tree"),
+ * and because a batch is atomic that refusal would sink the whole delete. Filtering
+ * first turns the common case (rubber-band or shift-click that caught a container
+ * and its contents) into the thing the user meant: delete the container once.
+ *
+ * Order is preserved and duplicates collapse, so the caller's selection order still
+ * decides the order of operations.
+ */
+export function topmostNodes(tree: NodeTree, ids: readonly NodeId[]): readonly NodeId[] {
+  const unique = [...new Set(ids)];
+  // `isAncestor` reports true for a node against itself, hence the `other !== id`.
+  return unique.filter(
+    (id) => !unique.some((other) => other !== id && isAncestor(tree, other, id)),
+  );
+}
+
+/** Delete every given node — and everything under it — as ONE history entry. */
+export function removeNodesCommand(ids: readonly NodeId[]): Command {
+  const label = ids.length === 1 ? 'Delete' : `Delete ${ids.length} nodes`;
+
+  return {
+    kind: 'removeNodes',
+    label,
+    apply(state, env) {
+      const tree = activePage(state).tree;
+      const targets = topmostNodes(tree, ids);
+      if (targets.length === 0) return refuse('Nothing to delete.');
+
+      // Each `removeNodeCommand` still checks its own preconditions (root, missing
+      // node) and carries its own inverse, including the node-scoped style rules.
+      return batchCommand(
+        label,
+        targets.map((id) => removeNodeCommand(id)),
+      ).apply(state, env);
+    },
+  };
+}
+
+/**
+ * Move every given node one slot earlier (`-1`) or later (`+1`) among its siblings,
+ * as ONE history entry.
+ *
+ * **No `coalesceKey`, deliberately.** This is a RELATIVE command, and `history.ts`'s
+ * `merge` takes the later entry's `redo` wholesale — valid only for commands that
+ * assign. Coalescing "move later" twice would redo a single step and land in the
+ * wrong place. Holding the arrow key is therefore N entries, which is correct.
+ *
+ * v1 reorders within the existing parent only: flow layout has no `left`/`top` to
+ * nudge, so pixel movement would mean inventing a positioning model. That waits for
+ * absolute positioning, exactly as into-container drops waited for E2 to land.
+ */
+export function reorderNodesCommand(ids: readonly NodeId[], direction: -1 | 1): Command {
+  const label = `Move ${ids.length === 1 ? 'node' : `${ids.length} nodes`} ${
+    direction < 0 ? 'earlier' : 'later'
+  }`;
+
+  return {
+    kind: 'reorderNodes',
+    label,
+    apply(state, env) {
+      const tree = activePage(state).tree;
+      if (ids.length === 0) return refuse('Nothing to move.');
+
+      const moves: { id: NodeId; parentId: NodeId; index: number }[] = [];
+      for (const id of new Set(ids)) {
+        if (!tree.nodes.has(id)) return refuse(`Node ${id} is not in the tree.`);
+        if (id === tree.root) return refuse('The page root cannot be moved.');
+
+        const parentId = parentIdOf(tree, id);
+        if (parentId === undefined) return refuse(`Node ${id} has no parent.`);
+
+        const index = siblingIndex(tree, id);
+        const lastIndex = childIdsOf(tree, parentId).length - 1;
+        /*
+         * Refuse at the boundary rather than let it no-op. `moveNode` clamps the
+         * index but still returns a NEW tree, so a node already first would report
+         * success having changed nothing — an entry whose undo the user cannot see,
+         * which is the bug `applyCommand`'s backstop exists to prevent. Refusing
+         * keeps a held arrow key at the edge from filling history with them.
+         */
+        if (direction < 0 && index === 0) return refuse('Already first among its siblings.');
+        if (direction > 0 && index === lastIndex) return refuse('Already last among its siblings.');
+
+        moves.push({ id, parentId, index });
+      }
+
+      // Moving earlier walks front-to-back, later back-to-front, so a node never
+      // lands on a slot another selected node is about to vacate.
+      moves.sort((a, b) => (direction < 0 ? a.index - b.index : b.index - a.index));
+
+      const commands = moves.map(({ id, parentId, index }) =>
+        moveNodeCommand(id, parentId, preMoveIndexFor(tree, id, parentId, index + direction)),
+      );
+      return batchCommand(label, commands).apply(state, env);
+    },
+  };
 }

@@ -10,7 +10,8 @@ the news.
 
 ## Where we are
 
-**Phases A–D complete; Phase E underway — E1, E2 (structural drag), and E3 (resize) all COMPLETE.**
+**Phases A–D complete; Phase E underway — E1, E2 (drag), E3 (resize) and E4 (multi-select ops +
+batching) all COMPLETE; only E5 (snap guides) is left.**
 Click to select, shift/ctrl to multi-select, a tracking overlay. Drag: `dropTarget` (where),
 `dragMachine` (when), `dragController` + the `resolveDrop` DOM adapter, pointer capture, a live
 `DropIndicator`. Resize: eight `ResizeHandles` grips → `resizeSize` (how big: edge direction, min
@@ -19,21 +20,23 @@ active breakpoint via `setStylePropertiesCommand` (one undo entry for a corner's
 commits on release. The browser-facing pieces cannot be observed on-screen in this environment (jsdom
 has no layout; the Browser pane never paints — memory `browser-pane-tabs-never-paint`), so they are
 pinned by **stubbed-layout tests** that feed known rects and by the `e2-app`/`e3-resize` mutation sets.
-E4 (multi-select ops + batching) is next. See the Phase E section.
+E4 adds `batchCommand` — several commands, ONE history entry, one combined inverse run backwards —
+plus multi-delete, arrow-key sibling reorder, and the shortcut layer (Delete, Escape, Ctrl+Z/Y).
+**E5 (snap guides) is next.** See the Phase E section.
 
 | | |
 | --- | --- |
-| Last session | 2026-07-18 — E3 shipped: `resizeGeometry` + `resizeMachine` (`@vpb/interaction`), `setStylePropertiesCommand` (`@vpb/state`), `resizeController` + `ResizeHandles` (`apps/web`), tests, and the `e3-resize` mutation set |
-| Git | branch **`phase-c`**, **22 commits** ahead of `main` @ `6da69ce`; the E3 feature commit is `faf9dad`, on top of the E2 app slice `11b4935` (this line is pinned by a trailing docs commit, so the literal tip is that pointer). **Not pushed, not merged.** Rename to `phase-e` or merge. |
-| Working tree | Clean (E3 + these doc updates committed) |
-| `pnpm verify` | Green — typecheck, lint, encoding, **916 tests across 41 files**, build (re-run 2026-07-18) |
-| `pnpm mutate` | Green — **153/153 caught** (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14) |
+| Last session | 2026-07-22 — E4 shipped: `batchCommand` + `removeNodesCommand`/`reorderNodesCommand`/`topmostNodes` (`@vpb/state`), `keyboardController` + Canvas wiring (`apps/web`), tests, and the `e4-batch`/`e4-keys` mutation sets |
+| Git | branch **`phase-c`**, ahead of `main` @ `6da69ce`; HEAD is the E4 commit, on top of `902d9d9` (the E3 mutation-set robustness fix). **Not pushed, not merged.** Rename to `phase-e` or merge. |
+| Working tree | Clean (E4 + the harness fix + these doc updates committed) |
+| `pnpm verify` | Green — typecheck, lint, encoding, **950 tests across 43 files**, build (verified locally 2026-07-22) |
+| `pnpm mutate` | Green — **169/169 caught**, zero survivors, zero stale, zero ambiguous, exit 0 (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14, E4 16) |
 
-Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), **E1** (selection + overlay), all of
-**E2** (structural drag), and all of **E3** (resize — geometry + machine + plural command + grips).
+Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), **E1** (selection + overlay), **E2**
+(structural drag), **E3** (resize), and **E4** (multi-select ops + batching).
 
-> Test counts by project: `core` 527, `state` 164, `interaction` 43, `renderer` 52, `tokens` 48,
-> `ui` 34, `web` 48 = 916.
+> Test counts by project: `core` 527, `state` 185, `interaction` 43, `renderer` 52, `tokens` 48,
+> `ui` 34, `web` 61 = 950.
 >
 > The branch is still named `phase-c` and now carries all of D and the start of E. Rename or merge
 > before it gets confusing.
@@ -156,6 +159,15 @@ runs in **node**, making "headless" a build gate rather than a promise.
   to four `@vpb/core` files during B3. `pnpm encoding:check` gates it; `pnpm encoding:fix` reverses it.
 - **On this Windows box, Node is not on the shell's `PATH`** until refreshed from the Machine scope:
   `$env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")`.
+- **A mutation verdict is the EXIT CODE, never scraped text.** `mutate.mjs` used to decide "caught" by
+  matching `/Tests\s+(\d+) failed/` in the runner's output and discarding the exit status
+  (`const { out } = run(...)`). That is environment-dependent — colour codes, a reporter or vitest
+  version whose summary reads differently — and when the pattern misses it scores **0**, which reads as
+  SURVIVED. Because the baseline used the same function, the run also printed "green" first, so the
+  signature is **an entire suite surviving while `pnpm verify` passes**. If you ever see that, suspect
+  the harness, not the tests. The verdict is now `!outcome.ok`; the parsed count only decorates the row,
+  and an unreadable count still reports `caught (non-zero exit)`. A `testCommand` that runs **zero
+  tests** is also refused outright now, since it too exits 0 and would make everything "survive".
 - **A mutation set's `testCommand` uses exactly ONE `--project`, and every `find` is a single line.**
   E3 first shipped as one file whose `testCommand` repeated the flag
   (`--project interaction --project state --project web`); that form is non-standard here (every E2 set
@@ -184,11 +196,9 @@ The phase's spec (AUDIT §8) is met. What remains is deliberate scope, not omiss
    in C depends on it.
 2. **Asset commands.** Same story; Phase F owns assets and will want them.
 3. **`valuesEqual` in `@vpb/core`** — see Technical debt.
-4. **Multi-node commands.** Every command targets one node. Phase E's multi-select will want
-   "delete/move all selected" as ONE history entry, which needs either a composite command or a
-   transaction. `EditorContext.selection` is already a list, so the model is ready; the batching is
-   not designed. AUDIT §7.3 lists "no transaction/batching" among the defects, so this is the one
-   clause of that sentence not yet answered.
+4. ~~**Multi-node commands.**~~ **ANSWERED by E4.** `batchCommand` makes several commands one history
+   entry with one combined inverse, and `removeNodesCommand`/`reorderNodesCommand` are built on it, so
+   AUDIT §7.3's "no transaction/batching" clause is now closed. See "What E4 shipped".
 
 ---
 
@@ -223,10 +233,10 @@ These items are still deferred as noted; none of them blocks Phase E.
 
 ## Phase E — where it stands
 
-**Underway. E1 (selection + overlay), E2 (structural drag), and E3 (resize) are all COMPLETE; E4–E5
-are not built.** The full plan is in `C:\Users\hp\.claude\plans\rustling-toasting-badger.md` (or ask for
-it) — it designs all of E and the architecture that holds across it. The load-bearing decisions, so
-nobody reverses them:
+**Underway. E1 (selection + overlay), E2 (structural drag), E3 (resize) and E4 (multi-select ops +
+batching) are all COMPLETE; only E5 is not built.** The full plan is in
+`C:\Users\hp\.claude\plans\rustling-toasting-badger.md` (or ask for it) — it designs all of E and the
+architecture that holds across it. The load-bearing decisions, so nobody reverses them:
 
 - **DOM → NodeId is a dedicated `data-vpb-node-id` attribute, NOT the `n-<id>` styling class.** Stamped
   centrally in `renderNode` (`packages/renderer/src/RenderTree.tsx`) via `cloneElement`, so every
@@ -346,12 +356,41 @@ Eight grips on the selected box, driving the same brain/adapter split. Everythin
 
 On-screen confirmation of a real resize is owed opportunistically, on the same terms as E2's drag.
 
-### Still to do in Phase E (sequenced)
+### What E4 shipped (batching + multi-select ops)
 
-- **E4 — multi-select ops + batching.** `batchCommand` composite in `@vpb/state` (the answer to AUDIT
-  §5.3's "no transaction/batching"; a transaction in an inverse-command history IS a composite with a
-  combined inverse) — delete/move all selected as one history entry. Keyboard shortcuts (Delete,
-  arrow-nudge, Escape, Ctrl+Z/Y wired to store `undo`/`redo`).
+The last clause of AUDIT §7.3 — "no transaction/batching" — answered without new history machinery,
+because **a transaction in an inverse-command history IS a composite with a combined inverse**.
+
+- `packages/state/src/commands/batch.ts` — `batchCommand(label, commands)`. Runs the parts in order
+  through `applyCommand` (so each part keeps the invoker's "changed nothing" backstop), collects each
+  inverse, and undoes by running them **REVERSED**. Removing siblings a@0 then b@0 (b shifted when a
+  went) only undoes to `[a, b]` backwards; forward order restores the same nodes to the wrong slots —
+  invisible for one command and wrong for exactly the multi-node case this exists for. **Atomic**: any
+  part refusing aborts the whole batch with no state, so nothing partial can reach history. An **empty
+  batch refuses** (it would be an entry whose undo does nothing). No `coalesceKey`.
+- `nodeCommands.ts` — `topmostNodes(tree, ids)` drops any node whose ancestor is also selected; without
+  it, selecting a container AND its child asks to remove the child twice and atomicity sinks the delete.
+  `removeNodesCommand(ids)` deletes the selection as one entry (each part still carries its own inverse
+  including the node-scoped style rules). `reorderNodesCommand(ids, ±1)` moves each selected node one
+  slot among its siblings.
+- **Arrow keys REORDER, they do not nudge by pixels.** Flow layout has no `left`/`top` to move, so pixel
+  nudging would mean inventing a positioning model; it waits for absolute positioning. Reorder is a
+  **RELATIVE** command and therefore carries **no `coalesceKey`** — `history.ts`'s `merge` takes the
+  later entry's `redo` wholesale, which is only valid for commands that assign. It also **refuses at the
+  boundary** rather than no-op, because `moveNode` clamps but still returns a NEW tree, so a node already
+  first would otherwise report success having changed nothing.
+- Multi-node ordering: moving earlier walks front-to-back, later back-to-front, so a node never lands on
+  a slot another selected node is about to vacate. Target indices are computed against the pre-batch tree
+  and converted by the existing `preMoveIndexFor`.
+- `apps/web/src/keyboardController.ts` — the shortcut table as a tested seam taking a `KeyboardEvent`
+  (Canvas only binds the listener). Delete/Backspace, arrows, Escape, Ctrl/Cmd+Z, Ctrl+Shift+Z / Ctrl+Y.
+  Two guards worth keeping: it **never fires while focus is in a text field** (`closest`, not
+  `instanceof`, for the realm reason E1 documented), and it **declines while `pending !== null`** so a
+  previewing drag/resize owns Escape rather than having the selection cleared out from under its cancel.
+- Mutations: `tools/mutations/e4-batch.mjs` (state, 9) and `e4-keys.mjs` (web, 7).
+
+### Still to do in Phase E
+
 - **E5 — snap guides.** Headless alignment geometry in `@vpb/interaction`; `apps/web` draws the guides.
 
 ---

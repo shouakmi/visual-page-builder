@@ -31,8 +31,14 @@ export {
   moveNodeCommand,
   restoreNodePositionCommand,
   planDuplicateNode,
+  topmostNodes,
+  removeNodesCommand,
+  reorderNodesCommand,
 } from './commands/nodeCommands.ts';
 export type { CommandPlan } from './commands/nodeCommands.ts';
+
+/* Transactions — several commands, one history entry (the answer to AUDIT §7.3). */
+export { batchCommand } from './commands/batch.ts';
 
 export {
   setStylePropertyCommand,

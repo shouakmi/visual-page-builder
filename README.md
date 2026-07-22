@@ -19,10 +19,13 @@ An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web
 > selection drive the same shape — headless geometry (`resizeSize`: which edge grows, the min-size
 > clamp, the aspect lock) and lifecycle (`resizeMachine`) in `@vpb/interaction`, a `resizeController`
 > that previews width/height on the active breakpoint and commits on release, and a
-> `setStylePropertiesCommand` so a corner resize (width AND height) is ONE undo entry. Every
-> browser-facing piece across E2–E3 is verified with stubbed-layout tests (jsdom lays nothing out) and
-> a mutation set. The canvas renders through **the same compiler the export will call**, so what you
-> see is what Phase I ships. See the [Roadmap](#roadmap).
+> `setStylePropertiesCommand` so a corner resize (width AND height) is ONE undo entry. **Multi-select
+> ops (E4) are complete**: `batchCommand` makes several commands one history entry with one combined
+> inverse — the answer to AUDIT §7.3's "no transaction/batching" — so deleting a whole selection is a
+> single undo, arrow keys reorder the selection among its siblings, and Delete/Escape/Ctrl+Z/Ctrl+Y are
+> wired to the store. Every browser-facing piece across E2–E4 is verified with stubbed-layout tests
+> (jsdom lays nothing out) and a mutation set. The canvas renders through **the same compiler the
+> export will call**, so what you see is what Phase I ships. See the [Roadmap](#roadmap).
 
 See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
 [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
@@ -278,15 +281,15 @@ One runner, four projects, each with the environment it needs (`vitest.config.ts
 | Project    | Environment | Covers                                                  | Status          |
 | ---------- | ----------- | ------------------------------------------------------- | --------------- |
 | `core`     | node        | The model: style, cascade, compiler, tree, document     | 527 tests       |
-| `state`    | node        | Commands, inverses, history, the store                  | 164 tests       |
+| `state`    | node        | Commands, inverses, history, batching, the store        | 185 tests       |
 | `interaction` | node     | Drag + resize geometry and state machines                | 43 tests        |
 | `renderer` | jsdom       | Escaped rendering, the sandboxed frame, the hit-test handle | 52 tests     |
 | `tokens`   | node        | Token contract, CSS/TS parity, colour distinction       | 48 tests        |
 | `ui`       | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard      | 34 tests        |
-| `web`      | jsdom       | Canvas wiring (D4), selection (E1), drag (E2) + resize (E3) controllers | 48 tests |
+| `web`      | jsdom       | Canvas wiring (D4), selection (E1), drag/resize/keyboard controllers (E2–E4) | 61 tests |
 
 ```bash
-pnpm test                        # everything (916 today)
+pnpm test                        # everything (950 today)
 pnpm vitest run --project core   # one project
 ```
 
@@ -318,7 +321,7 @@ pnpm mutate --list         # show what would run, change nothing
 pnpm mutate --filter cycle # one mutation by name
 ```
 
-Every phase is built this way; **153 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
+Every phase is built this way; **169 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
 C, 12 for D1, 12 for D2 (the renderer: escaping, `isSafeUrl`, the `componentId -> React` map), 9 for D3
 (the sandboxed frame: the `sandbox` attribute, incremental reconciliation), 8 for D4 (the app wiring:
 `present` vs `committed`, the active page, the per-page node filter, device sizing), 7 for E1 (the
@@ -329,7 +332,10 @@ read, container drops, the validity guard, pointer capture, the drop-indicator t
 and 14 for E3 (resize geometry: the min clamp, the edge direction, the axis, the aspect lock; the
 machine: threshold, commit-on-release, escape-cancel; the plural command: the coalesce key, unset-on-
 undo; the controller: width+height, commit, cancel-vs-commit, active-vs-base breakpoint; the grips:
-the transposed start size).
+the transposed start size), and 16 for E4 (batching: partial apply, a forward inverse, a skipped
+refusal, an empty batch; the multi-node ops: the topmost filter, a coalescing relative command, the
+boundary guard, direction, processing order; the keyboard: Delete, arrow direction, Ctrl+Z-as-redo,
+typing hijacked, Escape, the in-flight-gesture guard).
 
 Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
 their first run, which proves only that they were written against code that already passed them.
@@ -413,7 +419,7 @@ the code still compiles and the tests still pass — which is precisely why it i
 | **B3** | **Document — node tree + index, component registry, page/project. ✅**          |
 | **C**  | **Commands, inverse-command history, Zustand store — headless and testable. ✅** |
 | **D**  | **Renderer + style compiler + sandboxed canvas, wired into the app; the shared-compiler WYSIWYG invariant. ✅ Done.** |
-| E     | Interaction: overlay, structural drag, resize, multi-select, snap guides. **Selection (E1) ✅; structural drag (E2) ✅; resize (E3) ✅ — grips → width/height on the active breakpoint, one undo per gesture. Multi-select ops (E4) + snap guides (E5) remain** |
+| E     | Interaction: overlay, structural drag, resize, multi-select, snap guides. **Selection (E1) ✅; structural drag (E2) ✅; resize (E3) ✅; multi-select ops + batching (E4) ✅ — `batchCommand`, multi-delete, arrow reorder, shortcuts. Snap guides (E5) remain** |
 | F     | Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets  |
 | G     | HTML/CSS importer — the validator of the Phase B model                      |
 | H     | Style panel + component library                                             |

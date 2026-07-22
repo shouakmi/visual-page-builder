@@ -15,6 +15,7 @@ import type { StoreApi } from 'zustand/vanilla';
 
 import { DropIndicator } from './DropIndicator.tsx';
 import { createDragController } from './dragController.ts';
+import { createKeyboardController } from './keyboardController.ts';
 import { createResizeController } from './resizeController.ts';
 import { resolveDrop } from './resolveDrop.ts';
 import { ResizeHandles } from './ResizeHandles.tsx';
@@ -214,6 +215,20 @@ export function Canvas({ store }: CanvasProps) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [resizing, resize]);
+
+  /**
+   * Editor shortcuts: Delete, arrow-reorder, Escape, undo/redo (E4).
+   *
+   * Bound once for the life of the store, not per gesture — the controller itself
+   * declines while a drag or resize is previewing, so this never races the Escape
+   * handlers above.
+   */
+  const keyboard = useMemo(() => createKeyboardController(store), [store]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => keyboard.handle(event);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [keyboard]);
 
   /**
    * Capture the pointer for the drag, on the FRAME's root element — it received the
