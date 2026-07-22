@@ -29,7 +29,7 @@ it), `snapTargets` (the DOM adapter), and `SnapGuides` (the overlay). **Phase E 
 | | |
 | --- | --- |
 | Last session | 2026-07-22 — E5 shipped: `snapGuides` + the machine's snap step (`@vpb/interaction`), `snapTargets` + `SnapGuides` + controller/Canvas wiring (`apps/web`), tests, and the `e5-snap`/`e5-app` mutation sets |
-| Git | branch **`phase-c`**, ahead of `main` @ `6da69ce`; HEAD is the E5 commit, on top of `b65c5cf` (E4). **Not pushed, not merged.** Rename to `phase-e` or merge — it now carries all of D and all of E. |
+| Git | branch **`phase-c`**, ahead of `main` @ `6da69ce`; HEAD is the E5 commit `f50fe43`, on top of `b65c5cf` (E4). **Not pushed, not merged.** Rename to `phase-e` or merge — it now carries all of D and all of E. |
 | Working tree | Clean (E5 + these doc updates committed) |
 | `pnpm verify` | Green — typecheck, lint, encoding, **1000 tests across 46 files**, build (verified locally 2026-07-22) |
 | `pnpm mutate` | Green — **186/186 caught**, zero survivors, zero stale, zero ambiguous, exit 0 (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14, E4 16, E5 17) |
