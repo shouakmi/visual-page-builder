@@ -96,3 +96,16 @@ export function resizeSize(
     height: Math.max(height, constraints.minHeight),
   };
 }
+
+/**
+ * Whether this handle drives the WIDTH (rather than the height).
+ *
+ * Exported because snapping needs the same answer under an aspect lock: the driven
+ * axis is the one that may snap, and the other is derived from the ratio. That is
+ * exactly the split the aspect branch above makes — width drives when `hx` is
+ * non-zero, height otherwise — so it is stated once, here, rather than restated in
+ * `snapGuides` where it could drift out of agreement with the size math.
+ */
+export function drivesHorizontally(handle: ResizeHandle): boolean {
+  return HORIZONTAL[handle] !== 0;
+}

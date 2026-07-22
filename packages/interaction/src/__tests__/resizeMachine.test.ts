@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { RESIZE_IDLE, resizeStep, type ResizeState } from '../resizeMachine.ts';
 import type { Size } from '../resizeGeometry.ts';
+import type { SnapCandidate } from '../snapGuides.ts';
 
 /**
  * Pure transitions — no DOM, no store. The start size a `down` carries is measured
@@ -72,6 +73,7 @@ describe('the threshold', () => {
       type: 'preview',
       nodeId: NODE,
       size: { width: 103, height: 54 },
+      guides: [],
     });
   });
 });
@@ -88,6 +90,7 @@ describe('resizing', () => {
       type: 'preview',
       nodeId: NODE,
       size: { width: 140, height: 70 },
+      guides: [],
     });
   });
 
@@ -98,6 +101,7 @@ describe('resizing', () => {
       type: 'preview',
       nodeId: NODE,
       size: { width: 140, height: 70 },
+      guides: [],
     });
   });
 
@@ -111,6 +115,136 @@ describe('resizing', () => {
     const step = resizeStep(resizing, { type: 'cancel' }, OPTS);
     expect(step.state).toEqual(RESIZE_IDLE);
     expect(step.intent).toEqual({ type: 'cancel' });
+  });
+});
+
+describe('snapping', () => {
+  /** A vertical line at `position`, spanning well clear of the box. */
+  const line = (position: number): SnapCandidate => ({
+    axis: 'x',
+    position,
+    kind: 'edge',
+    from: 200,
+    to: 300,
+  });
+
+  it('changes nothing when the host offers no lines — the pre-snap behaviour, exactly', () => {
+    const withoutSnap = resizeStep(
+      resizing,
+      { type: 'move', point: { x: 40, y: 20 }, aspect: false },
+      OPTS,
+    );
+    const withEmptySnap = resizeStep(
+      resizing,
+      {
+        type: 'move',
+        point: { x: 40, y: 20 },
+        aspect: false,
+        snap: { boxOrigin: { x: 0, y: 0 }, candidates: [] },
+      },
+      OPTS,
+    );
+
+    expect(withEmptySnap.intent).toEqual(withoutSnap.intent);
+  });
+
+  it('pulls the previewed size onto a nearby line and reports the guide', () => {
+    // se corner from 100x50 by (40, 20) is 140x70; a line at 143 captures the edge.
+    const step = resizeStep(
+      resizing,
+      {
+        type: 'move',
+        point: { x: 40, y: 20 },
+        aspect: false,
+        snap: { boxOrigin: { x: 0, y: 0 }, candidates: [line(143)] },
+      },
+      OPTS,
+    );
+
+    expect(step.intent).toMatchObject({
+      type: 'preview',
+      size: { width: 143, height: 70 },
+    });
+    expect(step.intent).toHaveProperty('guides', [
+      { axis: 'x', position: 143, kind: 'edge', from: 0, to: 300 },
+    ]);
+  });
+
+  it('does not snap a grab that has not crossed the threshold yet', () => {
+    const step = resizeStep(
+      pending,
+      {
+        type: 'move',
+        point: { x: 1, y: 1 },
+        aspect: false,
+        snap: { boxOrigin: { x: 0, y: 0 }, candidates: [line(101)] },
+      },
+      OPTS,
+    );
+
+    // Still pending: a line near the untouched box must not start a resize.
+    expect(step.state).toBe(pending);
+    expect(step.intent).toEqual({ type: 'none' });
+  });
+
+  it('lets the minimum-size floor override a snap below it, and drops the guide with it', () => {
+    // Dragging the se corner far up-left puts the raw width on the 40px floor. The
+    // line at x=37 is within reach of that edge but BELOW the floor, so the floor
+    // wins and the box does not reach it — and a guide may not claim otherwise.
+    // (The box centre at x=20 is far out of range, so only the edge competes here.)
+    const step = resizeStep(
+      resizing,
+      {
+        type: 'move',
+        point: { x: -95, y: -45 },
+        aspect: false,
+        snap: { boxOrigin: { x: 0, y: 0 }, candidates: [line(37)] },
+      },
+      { ...OPTS, minWidth: 40 },
+    );
+
+    expect(step.intent).toMatchObject({ size: { width: 40 } });
+    expect(step.intent).toHaveProperty('guides', []);
+  });
+
+  describe('with the aspect ratio locked', () => {
+    it('snaps the axis the handle drives and keeps the ratio exact', () => {
+      // 'se' drives width. Raw 140x70 (ratio 2); a line at 144 takes the width, and
+      // the height follows from the ratio rather than the pointer.
+      const step = resizeStep(
+        resizing,
+        {
+          type: 'move',
+          point: { x: 40, y: 20 },
+          aspect: true,
+          snap: { boxOrigin: { x: 0, y: 0 }, candidates: [line(144)] },
+        },
+        OPTS,
+      );
+
+      expect(step.intent).toMatchObject({ size: { width: 144, height: 72 } });
+    });
+
+    it('declines a line it could only reach by breaking the ratio', () => {
+      // A horizontal line 2px from the bottom edge — in range, but 'se' drives the
+      // width, so honouring it would distort the locked box. The ratio wins.
+      const step = resizeStep(
+        resizing,
+        {
+          type: 'move',
+          point: { x: 40, y: 20 },
+          aspect: true,
+          snap: {
+            boxOrigin: { x: 0, y: 0 },
+            candidates: [{ axis: 'y', position: 72, kind: 'edge', from: 200, to: 300 }],
+          },
+        },
+        OPTS,
+      );
+
+      expect(step.intent).toMatchObject({ size: { width: 140, height: 70 } });
+      expect(step.intent).toHaveProperty('guides', []);
+    });
   });
 });
 

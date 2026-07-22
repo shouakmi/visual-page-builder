@@ -1,7 +1,8 @@
 import type { NodeId } from '@vpb/core';
 
 import type { Point } from './dropTarget.ts';
-import { resizeSize, type ResizeHandle, type Size } from './resizeGeometry.ts';
+import { drivesHorizontally, resizeSize, type ResizeHandle, type Size } from './resizeGeometry.ts';
+import { snapSize, type SnapCandidate, type SnapGuide, type SnapResult } from './snapGuides.ts';
 
 /**
  * THE RESIZE STATE MACHINE — a pointer resize as a pure transition function.
@@ -46,14 +47,42 @@ export type ResizeInput =
       readonly start: Size;
       readonly point: Point;
     }
-  | { readonly type: 'move'; readonly point: Point; readonly aspect: boolean }
+  | {
+      readonly type: 'move';
+      readonly point: Point;
+      readonly aspect: boolean;
+      /**
+       * The alignment lines available right now, measured by the host. Absent
+       * means no snapping, which is exactly the pre-E5 behaviour.
+       */
+      readonly snap?: SnapInput;
+    }
   | { readonly type: 'up' }
   | { readonly type: 'cancel' };
+
+/**
+ * What the box could align to, measured fresh on every move.
+ *
+ * Fresh, not captured at grab time: resizing a box reflows the page around it, so
+ * both its own origin and its neighbours' positions can move mid-gesture. Reading
+ * them once at `down` would snap to where things used to be.
+ */
+export interface SnapInput {
+  /** The resized box's top-left, in the same coordinates the candidates were measured in. */
+  readonly boxOrigin: Point;
+  readonly candidates: readonly SnapCandidate[];
+}
 
 /** What the host should do to the store. `nodeId` rides on `preview` so the host tracks nothing. */
 export type ResizeIntent =
   | { readonly type: 'none' }
-  | { readonly type: 'preview'; readonly nodeId: NodeId; readonly size: Size }
+  | {
+      readonly type: 'preview';
+      readonly nodeId: NodeId;
+      readonly size: Size;
+      /** The lines the size landed on. Empty when nothing snapped — a guide is never drawn on speculation. */
+      readonly guides: readonly SnapGuide[];
+    }
   | { readonly type: 'commit' }
   | { readonly type: 'cancel' };
 
@@ -62,7 +91,12 @@ export interface ResizeOptions {
   readonly threshold: number;
   readonly minWidth: number;
   readonly minHeight: number;
+  /** On-screen pixels within which an edge snaps to an alignment line. Default 5. */
+  readonly snapThreshold?: number;
 }
+
+/** Close enough to feel magnetic, far enough that a deliberate size is still reachable. */
+const DEFAULT_SNAP_THRESHOLD = 5;
 
 export const RESIZE_IDLE: ResizeState = { phase: 'idle' };
 
@@ -130,7 +164,29 @@ export function resizeStep(
           ...(aspectRatio !== undefined ? { aspectRatio } : {}),
         },
       );
-      return { state: resizing, intent: { type: 'preview', nodeId: state.nodeId, size } };
+
+      // Snap after the size math, clamp after the snap. An alignment line can sit
+      // below the floor, and the floor is what keeps a box selectable at all, so it
+      // gets the last word — a snap may never be the thing that shrinks a box away.
+      const snapped = applySnap(size, input.snap, aspectRatio, state.handle, options);
+      const clamped: Size = {
+        width: Math.max(snapped.size.width, options.minWidth),
+        height: Math.max(snapped.size.height, options.minHeight),
+      };
+
+      // A guide claims "this edge is on that line", so it survives only where the
+      // edge really landed there. Where the floor overrode the snap, the box is not
+      // on the line and drawing one anyway would be the overlay telling a lie.
+      const heldWidth = clamped.width === snapped.size.width;
+      const heldHeight = clamped.height === snapped.size.height;
+      const guides = snapped.guides.filter((guide) =>
+        guide.axis === 'x' ? heldWidth : heldHeight,
+      );
+
+      return {
+        state: resizing,
+        intent: { type: 'preview', nodeId: state.nodeId, size: clamped, guides },
+      };
     }
 
     case 'up':
@@ -149,4 +205,30 @@ export function resizeStep(
 
 function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/**
+ * Snapping, when the host offered anything to snap to.
+ *
+ * Under an aspect lock the ratio is handed through along with the axis the handle
+ * drives, and `snapSize` then confines itself to that axis so the ratio survives
+ * untouched. The aspect modifier therefore keeps its single meaning — preserve the
+ * ratio — and never doubles as a "disable snapping" key; snapping simply declines
+ * the moves where the two cannot both be honoured.
+ */
+function applySnap(
+  size: Size,
+  snap: SnapInput | undefined,
+  aspectRatio: number | undefined,
+  handle: ResizeHandle,
+  options: ResizeOptions,
+): SnapResult {
+  if (!snap || snap.candidates.length === 0) return { size, guides: [] };
+
+  return snapSize(snap.boxOrigin, size, snap.candidates, {
+    threshold: options.snapThreshold ?? DEFAULT_SNAP_THRESHOLD,
+    ...(aspectRatio !== undefined
+      ? { aspectRatio, driven: drivesHorizontally(handle) ? ('x' as const) : ('y' as const) }
+      : {}),
+  });
 }

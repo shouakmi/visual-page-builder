@@ -7,7 +7,7 @@ import {
   type NodeId,
 } from '@vpb/core';
 import { CanvasFrame, RenderChildren, classNameFor, createBuiltinRenderers } from '@vpb/renderer';
-import type { Drop } from '@vpb/interaction';
+import type { Drop, SnapGuide } from '@vpb/interaction';
 import { activePage, type EditorState, type EditorStore } from '@vpb/state';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
@@ -20,6 +20,8 @@ import { createResizeController } from './resizeController.ts';
 import { resolveDrop } from './resolveDrop.ts';
 import { ResizeHandles } from './ResizeHandles.tsx';
 import { SelectionLayer } from './SelectionLayer.tsx';
+import { snapTargets } from './snapTargets.ts';
+import { SnapGuides } from './SnapGuides.tsx';
 
 /**
  * The canvas: the active page, compiled and rendered.
@@ -90,6 +92,8 @@ export function Canvas({ store }: CanvasProps) {
   const [resizing, setResizing] = useState(false);
   /** The gap a release would drop into, shown as the drop indicator. */
   const [dropHint, setDropHint] = useState<Drop | null>(null);
+  /** The alignment lines the in-flight resize is sitting on. Empty between gestures. */
+  const [guides, setGuides] = useState<readonly SnapGuide[]>([]);
 
   /** The drag machine wired to the store. Rebuilt only if the store changes. */
   const drag = useMemo(
@@ -104,15 +108,6 @@ export function Canvas({ store }: CanvasProps) {
   );
 
   /**
-   * The resize machine wired to the store. Its own `IdFactory` mints the one rule
-   * id a gesture may need, minted fresh per gesture inside the controller.
-   */
-  const resize = useMemo(
-    () => createResizeController(store, { ids: createIdFactory(), onResizingChange: setResizing }),
-    [store],
-  );
-
-  /**
    * Live values for the pointer handlers, so the listeners bind ONCE per frame
    * document rather than re-attaching on every edit (which would drop an in-flight
    * drag). `treeRef` is what `resolveDrop` measures against; `draggedIdRef` is the
@@ -122,6 +117,32 @@ export function Canvas({ store }: CanvasProps) {
   treeRef.current = page.tree;
   const draggedIdRef = useRef<NodeId | null>(null);
   const pointerIdRef = useRef<number | null>(null);
+  /** Same reason, for the resize: `snapFor` must measure the CURRENT frame document. */
+  const frameDocRef = useRef<Document | null>(frameDoc);
+  frameDocRef.current = frameDoc;
+
+  /**
+   * The resize machine wired to the store. Its own `IdFactory` mints the one rule
+   * id a gesture may need, minted fresh per gesture inside the controller.
+   *
+   * `snapFor` is the E5 seam: the controller asks, per move, what the node could
+   * align to, and this reads the page to answer. It goes through the refs so the
+   * controller survives re-renders — rebuilding it mid-gesture would lose the
+   * machine's state and strand the resize.
+   */
+  const resize = useMemo(
+    () =>
+      createResizeController(store, {
+        ids: createIdFactory(),
+        onResizingChange: setResizing,
+        onGuidesChange: setGuides,
+        snapFor: (nodeId) => {
+          const doc = frameDocRef.current;
+          return doc ? snapTargets({ doc, tree: treeRef.current, nodeId }) : null;
+        },
+      }),
+    [store],
+  );
 
   /**
    * Click to select, press-and-drag to move. The overlay above the frame is
@@ -288,6 +309,12 @@ export function Canvas({ store }: CanvasProps) {
           starts a resize instead of the drag a body press would.
         */}
         {!dragging && <ResizeHandles store={store} doc={frameDoc} controller={resize} />}
+        {/*
+          The guides sit above the grips: they are the feedback for the gesture the
+          grips are driving, and a hairline behind a 10px grip is not feedback. The
+          controller empties them on commit and cancel, so they cannot outlive it.
+        */}
+        <SnapGuides guides={guides} />
         <DropIndicator doc={frameDoc} tree={page.tree} drop={dropHint} />
         {dragging && (
           /*

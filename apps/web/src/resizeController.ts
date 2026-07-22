@@ -14,6 +14,8 @@ import {
   type ResizeIntent,
   type ResizeState,
   type Size,
+  type SnapGuide,
+  type SnapInput,
 } from '@vpb/interaction';
 import { setStylePropertiesCommand, type EditorStore } from '@vpb/state';
 import type { StoreApi } from 'zustand/vanilla';
@@ -66,7 +68,24 @@ export interface ResizeControllerOptions {
    * pointer and raise its shield for the duration and drop them after.
    */
   readonly onResizingChange?: (resizing: boolean) => void;
+  /**
+   * The alignment lines available to the node being resized, asked for on every
+   * move because the page reflows underneath the gesture.
+   *
+   * A provider rather than a value, and it is the host's job because it reads the
+   * DOM — this controller never touches an element, which is what keeps it
+   * testable against a real store with no layout. Absent means no snapping.
+   */
+  readonly snapFor?: (nodeId: NodeId) => SnapInput | null;
+  /** The lines the size landed on, for the overlay to draw. Emptied when the gesture ends. */
+  readonly onGuidesChange?: (guides: readonly SnapGuide[]) => void;
 }
+
+/**
+ * One shared empty array, so "still nothing snapped" is reference-identical from
+ * one move to the next and React can skip the re-render.
+ */
+const NO_GUIDES: readonly SnapGuide[] = [];
 
 export function createResizeController(
   store: StoreApi<EditorStore>,
@@ -78,9 +97,18 @@ export function createResizeController(
   let state: ResizeState = RESIZE_IDLE;
   let ruleId: StyleRuleId | null = null;
 
+  const emitGuides = (guides: readonly SnapGuide[]): void => {
+    options.onGuidesChange?.(guides.length === 0 ? NO_GUIDES : guides);
+  };
+
   const apply = (intent: ResizeIntent): void => {
+    // Commit and cancel both END the gesture, so the guides go with it either way —
+    // a line left on screen afterwards describes an alignment nothing is doing.
+    if (intent.type === 'commit' || intent.type === 'cancel') emitGuides(NO_GUIDES);
+
     switch (intent.type) {
       case 'preview': {
+        emitGuides(intent.guides);
         // The command applies to `committed`, so read the breakpoint from there —
         // the target must be the one the recorded entry will belong to.
         const breakpoint = store.getState().committed.context.activeBreakpointId;
@@ -123,7 +151,13 @@ export function createResizeController(
       ruleId = options.ids.styleRule();
       run({ type: 'down', nodeId, handle, start, point });
     },
-    move: (point, aspect) => run({ type: 'move', point, aspect }),
+    move: (point, aspect) => {
+      // Asked for per move, against the node the gesture armed. The machine ignores
+      // a move it never armed, so an idle stray costs no measurement either.
+      const nodeId = state.phase === 'idle' ? null : state.nodeId;
+      const snap = nodeId !== null ? (options.snapFor?.(nodeId) ?? null) : null;
+      run({ type: 'move', point, aspect, ...(snap !== null ? { snap } : {}) });
+    },
     up: () => run({ type: 'up' }),
     cancel: () => run({ type: 'cancel' }),
     isResizing: () => state.phase === 'resizing',

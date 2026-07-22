@@ -2,7 +2,7 @@
 
 An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web from one codebase.
 
-> **Status: Phases A–D complete; Phase E underway — the canvas is now interactive.** The workspace
+> **Status: Phases A–E complete — the canvas is fully interactive.** The workspace
 > installs, typechecks, lints, tests, builds, and themes; `@vpb/core` carries the style/cascade/document
 > model (B1–B3) **and the style compiler** (D1), and `@vpb/state` carries commands, undo/redo, and a
 > headless store (C). Phase D closed the loop end to end: `@vpb/renderer` turns the node tree into
@@ -23,9 +23,13 @@ An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web
 > ops (E4) are complete**: `batchCommand` makes several commands one history entry with one combined
 > inverse — the answer to AUDIT §7.3's "no transaction/batching" — so deleting a whole selection is a
 > single undo, arrow keys reorder the selection among its siblings, and Delete/Escape/Ctrl+Z/Ctrl+Y are
-> wired to the store. Every browser-facing piece across E2–E4 is verified with stubbed-layout tests
-> (jsdom lays nothing out) and a mutation set. The canvas renders through **the same compiler the
-> export will call**, so what you see is what Phase I ships. See the [Roadmap](#roadmap).
+> wired to the store. **Snap guides (E5) close the phase**: `snapCandidates`/`snapSize` decide which
+> neighbouring line a resized edge should land on, `snapTargets` reads the page for them, and
+> `SnapGuides` draws the line that explains the result — with the aspect lock kept as the one thing the
+> modifier means, so snapping yields to the ratio rather than switching off with it. Every
+> browser-facing piece across E2–E5 is verified with stubbed-layout tests (jsdom lays nothing out) and a
+> mutation set. The canvas renders through **the same compiler the export will call**, so what you see
+> is what Phase I ships. See the [Roadmap](#roadmap).
 
 See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
 [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
@@ -68,6 +72,8 @@ apps/
   web/                  @vpb/web    — the application (also Electron's renderer, Phase J)
     src/Canvas.tsx                    D4/E1: store -> compiler -> renderer -> frame, + click-to-select
     src/SelectionLayer.tsx            E1: the selection overlay, tracked by observers
+    src/snapTargets.ts                E5: reads the page for the lines a resize may align to
+    src/SnapGuides.tsx                E5: the guide lines that explain a snap
     src/starterProject.ts             the real Project the editor opens with (not a mock)
 packages/
   core/                 @vpb/core   — the domain model. Framework-free, no DOM.
@@ -78,7 +84,7 @@ packages/
     document/                         pages, project, asset library
   state/                @vpb/state  — the edit layer: commands, history, store. No React, no DOM.
     editorState.ts                    the document + where the user is in it
-  interaction/          @vpb/interaction — drag + resize geometry and lifecycle machines. Headless (E2, E3)
+  interaction/          @vpb/interaction — drag, resize and snap geometry + lifecycle machines. Headless (E2–E5)
   renderer/             @vpb/renderer — the node tree as escaped React, in a sandboxed iframe (D2/D3)
   tokens/               @vpb/tokens — design tokens: palette, semantic scale, theme.css
   ui/                   @vpb/ui     — design system: theming, primitives, app shell
@@ -247,6 +253,34 @@ Two rules fall out of this and are enforced by tests:
   against the *pre-first* state, which lands correctly precisely because these commands assign
   rather than adjust.
 
+### Snapping aligns a resize, because a drag has nothing to align
+
+Snap guides conventionally serve free positioning, and this editor has none — which decides where
+snapping can and cannot apply.
+
+A structural **drag** resolves to a discrete `{parentId, index}`: a gap between siblings, already drawn
+by `DropIndicator`. There is no continuous position to attract, so there is nothing to snap. A
+**resize** is continuous — width and height are real numbers — so its edges can be pulled onto a
+neighbour's line. E5 is therefore resize-snapping, and adding drag-snapping would mean first adding
+absolute positioning, which is E5 quietly becoming a different phase.
+
+The same constraint narrows *which* edges snap. `resizeSize` writes width and height only, because in
+flow layout the box's top-left is layout-determined and the model has no `left`/`top` to write. So of
+the four edges only the **right** and the **bottom** actually move — dragging the west grip grows the
+width and the browser still places the left edge where the layout says. Snapping matches those two
+lines and the centres between them (which move at half the rate, so closing a 3px centre gap costs 6px
+of width), and never a near edge.
+
+**The aspect modifier means one thing: preserve the ratio.** It is not also a "disable snapping" key.
+Snapping runs on every move; under the lock only the axis the handle *drives* may snap, and the other
+is re-derived from the ratio — so the ratio holds by construction and a line reachable only by breaking
+it is simply not taken, with no guide drawn. A modifier that silently did two jobs would make the
+gesture unpredictable in exactly the moment the user is being most deliberate.
+
+Guides never appear on speculation: one is emitted only where an edge genuinely landed on a line, and
+where the minimum-size floor overrules a snap the guide is dropped with it. A line on screen always
+means the box is on it.
+
 ### Tokens are enforced, not documented
 
 `semantic.ts` (TypeScript) and `theme.css` (CSS custom properties) are two representations of one
@@ -282,14 +316,14 @@ One runner, four projects, each with the environment it needs (`vitest.config.ts
 | ---------- | ----------- | ------------------------------------------------------- | --------------- |
 | `core`     | node        | The model: style, cascade, compiler, tree, document     | 527 tests       |
 | `state`    | node        | Commands, inverses, history, batching, the store        | 185 tests       |
-| `interaction` | node     | Drag + resize geometry and state machines                | 43 tests        |
+| `interaction` | node     | Drag, resize and snap geometry, and the state machines   | 73 tests        |
 | `renderer` | jsdom       | Escaped rendering, the sandboxed frame, the hit-test handle | 52 tests     |
 | `tokens`   | node        | Token contract, CSS/TS parity, colour distinction       | 48 tests        |
 | `ui`       | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard      | 34 tests        |
-| `web`      | jsdom       | Canvas wiring (D4), selection (E1), drag/resize/keyboard controllers (E2–E4) | 61 tests |
+| `web`      | jsdom       | Canvas wiring (D4), selection (E1), drag/resize/keyboard/snap controllers (E2–E5) | 81 tests |
 
 ```bash
-pnpm test                        # everything (950 today)
+pnpm test                        # everything (1000 today)
 pnpm vitest run --project core   # one project
 ```
 
@@ -321,7 +355,7 @@ pnpm mutate --list         # show what would run, change nothing
 pnpm mutate --filter cycle # one mutation by name
 ```
 
-Every phase is built this way; **169 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
+Every phase is built this way; **186 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
 C, 12 for D1, 12 for D2 (the renderer: escaping, `isSafeUrl`, the `componentId -> React` map), 9 for D3
 (the sandboxed frame: the `sandbox` attribute, incremental reconciliation), 8 for D4 (the app wiring:
 `present` vs `committed`, the active page, the per-page node filter, device sizing), 7 for E1 (the
@@ -332,10 +366,15 @@ read, container drops, the validity guard, pointer capture, the drop-indicator t
 and 14 for E3 (resize geometry: the min clamp, the edge direction, the axis, the aspect lock; the
 machine: threshold, commit-on-release, escape-cancel; the plural command: the coalesce key, unset-on-
 undo; the controller: width+height, commit, cancel-vs-commit, active-vs-base breakpoint; the grips:
-the transposed start size), and 16 for E4 (batching: partial apply, a forward inverse, a skipped
+the transposed start size), 16 for E4 (batching: partial apply, a forward inverse, a skipped
 refusal, an empty batch; the multi-node ops: the topmost filter, a coalescing relative command, the
 boundary guard, direction, processing order; the keyboard: Delete, arrow direction, Ctrl+Z-as-redo,
-typing hijacked, Escape, the in-flight-gesture guard).
+typing hijacked, Escape, the in-flight-gesture guard), and 17 for E5 (snap geometry: the threshold, the
+centre's double rate, nearest-wins, per-axis independence, the inversion guard, the guide's position,
+and both halves of the aspect rule; the machine: the floor overruling a snap, and a guide outliving the
+clamp that overrode it; the app: **snapping disconnected entirely**, guides outliving the gesture, a box
+offered its own edges, descendants instead of siblings, the container's lines dropped, a fixed origin,
+and a guide drawn perpendicular to the edge it marks).
 
 Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
 their first run, which proves only that they were written against code that already passed them.
@@ -419,7 +458,7 @@ the code still compiles and the tests still pass — which is precisely why it i
 | **B3** | **Document — node tree + index, component registry, page/project. ✅**          |
 | **C**  | **Commands, inverse-command history, Zustand store — headless and testable. ✅** |
 | **D**  | **Renderer + style compiler + sandboxed canvas, wired into the app; the shared-compiler WYSIWYG invariant. ✅ Done.** |
-| E     | Interaction: overlay, structural drag, resize, multi-select, snap guides. **Selection (E1) ✅; structural drag (E2) ✅; resize (E3) ✅; multi-select ops + batching (E4) ✅ — `batchCommand`, multi-delete, arrow reorder, shortcuts. Snap guides (E5) remain** |
+| **E** | **Interaction: overlay, structural drag, resize, multi-select ops + batching, snap guides. ✅ Done (E1–E5).** |
 | F     | Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets  |
 | G     | HTML/CSS importer — the validator of the Phase B model                      |
 | H     | Style panel + component library                                             |

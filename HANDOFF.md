@@ -10,8 +10,8 @@ the news.
 
 ## Where we are
 
-**Phases A–D complete; Phase E underway — E1, E2 (drag), E3 (resize) and E4 (multi-select ops +
-batching) all COMPLETE; only E5 (snap guides) is left.**
+**Phases A–E COMPLETE. E1 (selection), E2 (drag), E3 (resize), E4 (multi-select ops + batching) and
+E5 (snap guides) have all landed; Phase F (persistence) is next.**
 Click to select, shift/ctrl to multi-select, a tracking overlay. Drag: `dropTarget` (where),
 `dragMachine` (when), `dragController` + the `resolveDrop` DOM adapter, pointer capture, a live
 `DropIndicator`. Resize: eight `ResizeHandles` grips → `resizeSize` (how big: edge direction, min
@@ -22,23 +22,25 @@ has no layout; the Browser pane never paints — memory `browser-pane-tabs-never
 pinned by **stubbed-layout tests** that feed known rects and by the `e2-app`/`e3-resize` mutation sets.
 E4 adds `batchCommand` — several commands, ONE history entry, one combined inverse run backwards —
 plus multi-delete, arrow-key sibling reorder, and the shortcut layer (Delete, Escape, Ctrl+Z/Y).
-**E5 (snap guides) is next.** See the Phase E section.
+E5 adds snapping to the resize: `snapCandidates`/`snapSize` (which line, and the guide that explains
+it), `snapTargets` (the DOM adapter), and `SnapGuides` (the overlay). **Phase E is closed; Phase F
+(persistence) is next.** See the Phase E section.
 
 | | |
 | --- | --- |
-| Last session | 2026-07-22 — E4 shipped: `batchCommand` + `removeNodesCommand`/`reorderNodesCommand`/`topmostNodes` (`@vpb/state`), `keyboardController` + Canvas wiring (`apps/web`), tests, and the `e4-batch`/`e4-keys` mutation sets |
-| Git | branch **`phase-c`**, ahead of `main` @ `6da69ce`; HEAD is the E4 commit, on top of `902d9d9` (the E3 mutation-set robustness fix). **Not pushed, not merged.** Rename to `phase-e` or merge. |
-| Working tree | Clean (E4 + the harness fix + these doc updates committed) |
-| `pnpm verify` | Green — typecheck, lint, encoding, **950 tests across 43 files**, build (verified locally 2026-07-22) |
-| `pnpm mutate` | Green — **169/169 caught**, zero survivors, zero stale, zero ambiguous, exit 0 (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14, E4 16) |
+| Last session | 2026-07-22 — E5 shipped: `snapGuides` + the machine's snap step (`@vpb/interaction`), `snapTargets` + `SnapGuides` + controller/Canvas wiring (`apps/web`), tests, and the `e5-snap`/`e5-app` mutation sets |
+| Git | branch **`phase-c`**, ahead of `main` @ `6da69ce`; HEAD is the E5 commit, on top of `b65c5cf` (E4). **Not pushed, not merged.** Rename to `phase-e` or merge — it now carries all of D and all of E. |
+| Working tree | Clean (E5 + these doc updates committed) |
+| `pnpm verify` | Green — typecheck, lint, encoding, **1000 tests across 46 files**, build (verified locally 2026-07-22) |
+| `pnpm mutate` | Green — **186/186 caught**, zero survivors, zero stale, zero ambiguous, exit 0 (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14, E4 16, E5 17) |
 
-Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), **E1** (selection + overlay), **E2**
-(structural drag), **E3** (resize), and **E4** (multi-select ops + batching).
+Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), and all of **E** (E1 selection, E2
+structural drag, E3 resize, E4 multi-select ops + batching, E5 snap guides).
 
-> Test counts by project: `core` 527, `state` 185, `interaction` 43, `renderer` 52, `tokens` 48,
-> `ui` 34, `web` 61 = 950.
+> Test counts by project: `core` 527, `state` 185, `interaction` 73, `renderer` 52, `tokens` 48,
+> `ui` 34, `web` 81 = 1000.
 >
-> The branch is still named `phase-c` and now carries all of D and the start of E. Rename or merge
+> The branch is still named `phase-c` and now carries all of D and all of E. Rename or merge
 > before it gets confusing.
 
 **The canvas is interactive.** On top of the D4 wiring (`Canvas.tsx` reads `present`, compiles with
@@ -233,8 +235,8 @@ These items are still deferred as noted; none of them blocks Phase E.
 
 ## Phase E — where it stands
 
-**Underway. E1 (selection + overlay), E2 (structural drag), E3 (resize) and E4 (multi-select ops +
-batching) are all COMPLETE; only E5 is not built.** The full plan is in
+**COMPLETE. E1 (selection + overlay), E2 (structural drag), E3 (resize), E4 (multi-select ops +
+batching) and E5 (snap guides) have all landed.** The full plan is in
 `C:\Users\hp\.claude\plans\rustling-toasting-badger.md` (or ask for it) — it designs all of E and the
 architecture that holds across it. The load-bearing decisions, so nobody reverses them:
 
@@ -389,9 +391,69 @@ because **a transaction in an inverse-command history IS a composite with a comb
   previewing drag/resize owns Escape rather than having the selection cleared out from under its cancel.
 - Mutations: `tools/mutations/e4-batch.mjs` (state, 9) and `e4-keys.mjs` (web, 7).
 
+### What E5 shipped (snap guides — the resize gets a magnet)
+
+The last slice of Phase E, and the one whose scope had to be sharpened before it could be built.
+
+**Snapping applies to the RESIZE, not the drag, and that follows from the model.** A structural drag
+resolves to a discrete `{parentId, index}` — a gap already drawn by `DropIndicator` — so there is no
+continuous position to attract. A resize is continuous, so its edges can be pulled onto a neighbour's
+line. Building drag-snapping would have meant building absolute positioning first, which is E5
+quietly becoming a different phase. The same constraint narrows *which* edges: `resizeSize` writes
+width/height only, so only the **right** and **bottom** edges (and the centres, which move at half the
+rate) actually move. There is no near-edge snap because there is no `left`/`top` to write.
+
+- `packages/interaction/src/snapGuides.ts` — `snapCandidates(rects)` turns neighbour rects into lines
+  (both edges + the midline, both axes); `snapSize(origin, proposed, candidates, options)` returns the
+  adjusted size and the guides that explain it. Distance is the **on-screen gap**, not the width
+  change: a centre match closes a 3px gap by growing 6px, and thresholding the width change instead
+  would make centre snapping fire at half the visual distance of edge snapping. Ties break
+  deterministically (far edge over centre, then the lower line) so the result cannot depend on the
+  order rects were collected in. 21 tests.
+- `packages/interaction/src/resizeMachine.ts` — additive only: an optional `snap` on the `move` input
+  (`{boxOrigin, candidates}`, measured **fresh each move** because resizing reflows the page), an
+  optional `snapThreshold`, and `guides` on the `preview` intent. **Order is `resizeSize` → snap →
+  clamp**: the min floor is what keeps a box selectable, so it overrules a snap below it — and the
+  guide is dropped with it, because a guide claims the edge IS on the line. 6 tests.
+- `apps/web/src/snapTargets.ts` — the DOM adapter, sibling of `resolveDrop`. Siblings + the container,
+  never the node itself (its own edges are zero pixels away, so it could never be resized) and never
+  its descendants (they move because it resized — a feedback loop). 8 tests.
+- `apps/web/src/SnapGuides.tsx` — the overlay, third after `SelectionLayer` and `DropIndicator` and
+  the same shape: editor document, `pointer-events-none`, measures its own origin. Draws only what
+  `snapSize` reported. 5 tests.
+- `apps/web/src/resizeController.ts` — additive: a `snapFor(nodeId)` provider (the host reads the DOM,
+  the controller never does — that is what keeps it testable against a real store with no layout) and
+  `onGuidesChange`, emptied when the gesture ends. 7 tests.
+- `tools/mutations/e5-snap.mjs` (interaction, 10) and `e5-app.mjs` (web, 7) — 17, all caught.
+
+**The aspect modifier still means exactly one thing: preserve the ratio.** The first draft of this
+plan proposed using it to disable snapping; that was rejected in review, correctly — a modifier doing
+two jobs makes the gesture unpredictable at the moment the user is being most deliberate. So snapping
+runs on every move, and under the lock only the axis the handle DRIVES may snap while the other is
+re-derived from the ratio. The ratio therefore holds by construction, and a line reachable only by
+breaking it is simply not taken, with no guide drawn. Both halves of that rule are pinned by mutation
+(`the aspect lock is ignored and both axes snap freely`, `the locked resize stops deriving the other
+axis from the ratio`).
+
+**One pre-existing test file changed**, and it is worth knowing why: the `preview` intent now always
+carries a `guides` array, so three `toEqual` assertions in `resizeMachine.test.ts` gained `guides: []`.
+That is a shape change with no behaviour change — a resize with no candidates produces byte-identical
+sizes, which `resizes exactly as before when the host offers no lines` asserts directly. No E1–E4
+mutation went stale; no E1–E4 source file was touched except the two additive seams named above.
+
+On-screen confirmation of a real snap is owed opportunistically, on the same terms as E2's drag and
+E3's resize — jsdom lays nothing out and the Browser pane never paints here, so the stubbed-layout
+tests and the mutation sets are the real verification.
+
 ### Still to do in Phase E
 
-- **E5 — snap guides.** Headless alignment geometry in `@vpb/interaction`; `apps/web` draws the guides.
+Nothing — E1 through E5 are all complete. **Phase F (persistence: `StorageAdapter` → IndexedDB +
+SQLite, assets) is next.**
+
+Two pieces of browser-pending confirmation carry forward out of the phase, none of them coverage gaps:
+a real pointer drag reordering a node on screen (E2), a real grip resize (E3), and a real snap with its
+guide (E5). All three are logic that is fully pinned by stubbed-layout tests and mutations; what has
+not happened is a human watching a laid-out page do it.
 
 ---
 
