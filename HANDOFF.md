@@ -180,6 +180,12 @@ runs in **node**, making "headless" a build gate rather than a promise.
   CRLF checkout — keep every `find` single-line, and `.gitattributes` now pins LF so checkouts stop
   flipping. If a mutation run ever reports a whole set surviving, suspect the `testCommand` ran no tests
   before you suspect the tests.
+- **Run `pnpm format` BEFORE writing a mutation set, and re-run the set after any format.** Prettier
+  rewraps long lines, and a `find` pointing at a line it just split goes **STALE**. E5 hit this: the
+  guide filter was one 103-character line when its mutation was written and two lines after
+  `pnpm format`. The harness caught it (STALE fails the run, by design), but the cheap order is
+  format first, then pin. Prefer targeting a SHORT line — a named intermediate like
+  `const heldWidth = …` — over a long expression prettier is likely to reflow.
 - No `any` (lint-enforced). No placeholder implementations. Comments explain *why*.
 - Tests live in `__tests__/` beside the code and are picked up by `src/**/*.test.{ts,tsx}`.
 - Adding a package with Tailwind classes? Add it to `@source` in `apps/web/src/styles.css` or its
