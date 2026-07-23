@@ -7,16 +7,20 @@ import {
   createDeterministicIdFactory,
   createNode,
   createProject,
+  deserializeDocumentFile,
   findRule,
   getComponent,
   nodeScope,
   px,
   target,
   unsafeId,
+  type DocumentFile,
   type IdFactory,
   type Node,
+  type ProjectId,
   type StyleRuleId,
 } from '@vpb/core';
+import { createMemoryStorageAdapter } from '@vpb/storage';
 import { describe, expect, it } from 'vitest';
 
 import { insertNodeCommand, removeNodeCommand } from '../commands/nodeCommands.ts';
@@ -388,5 +392,243 @@ describe('headlessness', () => {
     const box = boxNode(ids);
     store.getState().execute(insertNodeCommand(box, rootOf(store)));
     expect(childrenOf(store)).toEqual([box.id]);
+  });
+});
+
+/**
+ * PHASE F1 — save / loadDocument / newDocument / isDirty.
+ *
+ * The dirty-state machine was formally reviewed transition by transition
+ * before this landed (see the Phase F handoff notes): reference equality
+ * between `history.past.at(-1)` and the checkpoint's `entry` is sound because
+ * commands are deterministic (nothing mints an id inside `apply`) and
+ * undo/redo move `HistoryEntry` objects by reference rather than recreating
+ * them. These tests exercise that proof, not just the happy path.
+ */
+describe('save / loadDocument / newDocument / isDirty', () => {
+  it('a fresh store is dirty — never-saved, independent of any edit', () => {
+    const { store } = makeStore();
+    expect(store.getState().isDirty()).toBe(true);
+  });
+
+  it('save succeeds and marks the document clean', async () => {
+    const { store } = makeStore({ storage: createMemoryStorageAdapter() });
+    const outcome = await store.getState().save();
+
+    expect(outcome.ok).toBe(true);
+    expect(store.getState().isDirty()).toBe(false);
+  });
+
+  it('save with no configured adapter fails and leaves dirty state untouched', async () => {
+    const { store } = makeStore();
+    const outcome = await store.getState().save();
+
+    expect(outcome.ok).toBe(false);
+    expect(store.getState().isDirty()).toBe(true);
+  });
+
+  it('an edit after save is dirty again', async () => {
+    const { store, ids } = makeStore({ storage: createMemoryStorageAdapter() });
+    await store.getState().save();
+
+    store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+    expect(store.getState().isDirty()).toBe(true);
+  });
+
+  it('undo back to the saved point is clean again', async () => {
+    const { store, ids } = makeStore({ storage: createMemoryStorageAdapter() });
+    store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+    await store.getState().save();
+    store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+    expect(store.getState().isDirty()).toBe(true);
+
+    store.getState().undo();
+    expect(store.getState().isDirty()).toBe(false);
+  });
+
+  it('redo away from the saved point is dirty again', async () => {
+    const { store, ids } = makeStore({ storage: createMemoryStorageAdapter() });
+    store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+    await store.getState().save();
+    store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+    store.getState().undo();
+    expect(store.getState().isDirty()).toBe(false);
+
+    store.getState().redo();
+    expect(store.getState().isDirty()).toBe(true);
+  });
+
+  it('save after an undo re-anchors to the CURRENT tail, not the pre-undo tail', async () => {
+    const { store, ids } = makeStore({ storage: createMemoryStorageAdapter() });
+    store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+    store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+    store.getState().undo();
+
+    await store.getState().save();
+    expect(store.getState().isDirty()).toBe(false);
+
+    // The entry undo left behind is still redoable — saving must not have
+    // silently anchored to it instead of the post-undo state.
+    store.getState().redo();
+    expect(store.getState().isDirty()).toBe(true);
+  });
+
+  it('a new edit after undo-truncate is dirty even though the discarded future is now unreachable', async () => {
+    const { store, ids } = makeStore({ storage: createMemoryStorageAdapter() });
+    store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+    await store.getState().save();
+    store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+    store.getState().undo();
+
+    store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+
+    expect(store.getState().canRedo()).toBe(false);
+    expect(store.getState().isDirty()).toBe(true);
+  });
+
+  it('a coalesced edit extending the saved entry is correctly dirty, not a false clean', async () => {
+    const { store, ids, tick } = makeStore({ storage: createMemoryStorageAdapter() });
+    const box = boxNode(ids);
+    store.getState().execute(insertNodeCommand(box, rootOf(store)));
+    store
+      .getState()
+      .execute(setStylePropertyCommand(nodeScope(box.id), base, 'width', px(10), ruleId('r1')));
+    await store.getState().save();
+    expect(store.getState().isDirty()).toBe(false);
+
+    tick(10);
+    store
+      .getState()
+      .execute(setStylePropertyCommand(nodeScope(box.id), base, 'width', px(20), ruleId('r1')));
+
+    expect(store.getState().isDirty()).toBe(true);
+  });
+
+  it('preview / cancelPreview never affect isDirty()', async () => {
+    const { store, ids } = makeStore({ storage: createMemoryStorageAdapter() });
+    const box = boxNode(ids);
+    store.getState().execute(insertNodeCommand(box, rootOf(store)));
+    await store.getState().save();
+    expect(store.getState().isDirty()).toBe(false);
+
+    store
+      .getState()
+      .preview(setStylePropertyCommand(nodeScope(box.id), base, 'width', px(50), ruleId('r1')));
+    expect(store.getState().isDirty()).toBe(false);
+
+    store.getState().cancelPreview();
+    expect(store.getState().isDirty()).toBe(false);
+  });
+
+  it('a context change never affects isDirty()', async () => {
+    const { store, ids } = makeStore({ storage: createMemoryStorageAdapter() });
+    const box = boxNode(ids);
+    store.getState().execute(insertNodeCommand(box, rootOf(store)));
+    await store.getState().save();
+
+    store.getState().select([box.id]);
+    expect(store.getState().isDirty()).toBe(false);
+  });
+
+  it('save() persists `committed`, never a live preview', async () => {
+    const adapter = createMemoryStorageAdapter();
+    const { store, ids } = makeStore({ storage: adapter });
+    const box = boxNode(ids);
+    store.getState().execute(insertNodeCommand(box, rootOf(store)));
+
+    store
+      .getState()
+      .preview(setStylePropertyCommand(nodeScope(box.id), base, 'width', px(50), ruleId('r1')));
+
+    await store.getState().save();
+
+    const loaded = await adapter.loadDocument(store.getState().committed.project.id);
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) {
+      const result = deserializeDocumentFile(loaded.value);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const rule = findRule(result.document.project.styles, nodeScope(box.id), base);
+        expect(rule?.declarations.width).toBeUndefined();
+      }
+    }
+  });
+
+  describe('loadDocument', () => {
+    it('loads a saved document into a fresh, clean baseline', async () => {
+      const adapter = createMemoryStorageAdapter();
+      const { store: writer, ids } = makeStore({ storage: adapter });
+      writer.getState().execute(insertNodeCommand(boxNode(ids), rootOf(writer)));
+      await writer.getState().save();
+      const savedId = writer.getState().committed.project.id;
+
+      const { store: reader } = makeStore({ storage: adapter });
+      const outcome = await reader.getState().loadDocument(savedId);
+
+      expect(outcome.ok).toBe(true);
+      expect(reader.getState().committed.project.id).toBe(savedId);
+      expect(reader.getState().history.past).toEqual([]);
+      expect(reader.getState().pending).toBeNull();
+      expect(reader.getState().isDirty()).toBe(false);
+    });
+
+    it('reports not-found and leaves the current document untouched', async () => {
+      const adapter = createMemoryStorageAdapter();
+      const { store, ids } = makeStore({ storage: adapter });
+      store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+      const editedPresent = store.getState().present;
+
+      const outcome = await store.getState().loadDocument(unsafeId<ProjectId>('missing'));
+
+      expect(outcome).toEqual({ ok: false, error: { kind: 'not-found' } });
+      expect(store.getState().present).toBe(editedPresent);
+      expect(store.getState().history.past).toHaveLength(1);
+    });
+
+    it('rejects a corrupt saved payload without touching the active document', async () => {
+      const adapter = createMemoryStorageAdapter();
+      const corruptId = unsafeId<ProjectId>('corrupt');
+      const corruptFile = {
+        schemaVersion: 1,
+        id: corruptId,
+        updatedAt: '2026-07-22T00:00:00.000Z',
+        project: { id: corruptId },
+      } as unknown as DocumentFile;
+      await adapter.saveDocument(corruptFile);
+
+      const { store, ids } = makeStore({ storage: adapter });
+      store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+      const editedPresent = store.getState().present;
+
+      const outcome = await store.getState().loadDocument(corruptId);
+
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) expect(outcome.error.kind).toBe('corrupt');
+      expect(store.getState().present).toBe(editedPresent);
+    });
+
+    it('with no configured adapter, fails without touching state', async () => {
+      const { store } = makeStore();
+      const before = store.getState().present;
+
+      const outcome = await store.getState().loadDocument(unsafeId<ProjectId>('x'));
+
+      expect(outcome.ok).toBe(false);
+      expect(store.getState().present).toBe(before);
+    });
+  });
+
+  describe('newDocument', () => {
+    it('starts a fresh, never-saved document with empty history', () => {
+      const { store, ids } = makeStore({ storage: createMemoryStorageAdapter() });
+      store.getState().execute(insertNodeCommand(boxNode(ids), rootOf(store)));
+
+      store.getState().newDocument(ids, 'Second Site');
+
+      expect(store.getState().history.past).toEqual([]);
+      expect(store.getState().pending).toBeNull();
+      expect(store.getState().present.project.name).toBe('Second Site');
+      expect(store.getState().isDirty()).toBe(true);
+    });
   });
 });

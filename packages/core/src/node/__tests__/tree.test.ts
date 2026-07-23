@@ -19,6 +19,7 @@ import { propAsset } from '../props.ts';
 import type { NodeTree } from '../tree.ts';
 import {
   ancestorIds,
+  buildNodeTree,
   canDropNode,
   canInsertComponent,
   canMoveNode,
@@ -707,5 +708,52 @@ describe('validateTree', () => {
     parents.set(root.id, a.id);
 
     expect(validateTree({ ...tree, parents }).join(' ')).toMatch(/root/i);
+  });
+});
+
+/**
+ * Phase F1's deserializer seam: rebuild a tree from a flat node array the way
+ * a loaded project file provides one. Mechanical only — see the function's own
+ * comment — so these tests prove the derivation is right on healthy input and
+ * that a BROKEN input is accepted rather than thrown on, leaving `validateTree`
+ * as the thing that actually catches it.
+ */
+describe('buildNodeTree', () => {
+  it('rebuilds an equivalent tree from a flat array, root first', () => {
+    const { tree, root, a, b, c } = flat();
+    const rebuilt = buildNodeTree([...tree.nodes.values()], root.id);
+
+    expect(rebuilt.root).toBe(root.id);
+    expect([...rebuilt.nodes.keys()].sort()).toEqual([...tree.nodes.keys()].sort());
+    expect(childIdsOf(rebuilt, root.id)).toEqual([a.id, b.id, c.id]);
+    expectConsistent(rebuilt);
+  });
+
+  it('rebuilds multi-level nesting, not just one level', () => {
+    const { tree, root, outer, inner, leaf } = nested();
+    const rebuilt = buildNodeTree([...tree.nodes.values()], root.id);
+
+    expect(parentIdOf(rebuilt, outer.id)).toBe(root.id);
+    expect(parentIdOf(rebuilt, inner.id)).toBe(outer.id);
+    expect(parentIdOf(rebuilt, leaf.id)).toBe(inner.id);
+    expectConsistent(rebuilt);
+  });
+
+  it('does not validate — a dangling child reference is accepted, not thrown on', () => {
+    const { root, a } = flat();
+    // `a` claims a child that is not in the array at all: exactly the shape a
+    // corrupted or hand-edited project file could smuggle in.
+    const broken = { ...a, children: [A('ghost')] };
+    const rebuilt = buildNodeTree([root, broken], root.id);
+
+    expect(() => rebuilt).not.toThrow();
+    expect(validateTree(rebuilt).join(' ')).toMatch(/missing child/i);
+  });
+
+  it('an empty array still produces a tree pointing at the given root', () => {
+    const rebuilt = buildNodeTree([], A('nope'));
+    expect(rebuilt.root).toBe(A('nope'));
+    expect(rebuilt.nodes.size).toBe(0);
+    expect(rebuilt.parents.size).toBe(0);
   });
 });

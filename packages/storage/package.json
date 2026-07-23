@@ -1,9 +1,9 @@
 {
-  "name": "@vpb/state",
+  "name": "@vpb/storage",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The editor's edit layer: commands, inverse-command history, and the headless store. No React, no DOM.",
+  "description": "The StorageAdapter contract and its adapters. Headless — no React, no DOM. Depends on @vpb/core only.",
   "exports": {
     ".": "./src/index.ts",
     "./package.json": "./package.json"
@@ -12,9 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@vpb/core": "workspace:*",
-    "@vpb/storage": "workspace:*",
-    "zustand": "^5.0.8"
+    "@vpb/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.9.3",

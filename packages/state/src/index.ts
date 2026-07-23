@@ -80,4 +80,5 @@ export type {
   EditorStoreState,
   EditorStoreActions,
   EditorStoreOptions,
+  SaveState,
 } from './store.ts';

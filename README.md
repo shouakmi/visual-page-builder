@@ -29,7 +29,18 @@ An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web
 > modifier means, so snapping yields to the ratio rather than switching off with it. Every
 > browser-facing piece across E2–E5 is verified with stubbed-layout tests (jsdom lays nothing out) and a
 > mutation set. The canvas renders through **the same compiler the export will call**, so what you see
-> is what Phase I ships. See the [Roadmap](#roadmap).
+> is what Phase I ships. **Phase F1 starts persistence**: `@vpb/core` gains `serializeProject`/
+> `deserializeProject` — Maps become the JSON-safe arrays every one of them already had a constructor
+> for, reconstructed through two validation layers (shape, then the existing `validateTree`/
+> `validateStyleSheet`/`validateBreakpointSet`/`validateProject`) so untrusted JSON can never crash the
+> caller — plus the one genuinely new primitive, `buildNodeTree`, that rebuilds a tree's derived parent
+> index from a flat node array. A new package, **`@vpb/storage`**, carries the `StorageAdapter` contract,
+> a cross-adapter test suite every future adapter runs, and an in-memory adapter; it depends on
+> `@vpb/core` and nothing else, so `@vpb/state` can orchestrate persistence without either package
+> knowing a browser or a filesystem exists. The store gains `save`/`loadDocument`/`newDocument`/
+> `isDirty`, and the dirty-state checkpoint is a reference to a `HistoryEntry` rather than a timestamp —
+> sound because commands are already deterministic and undo/redo move entries by reference. F1 is
+> entirely headless; F2 (a real IndexedDB adapter) is next. See the [Roadmap](#roadmap).
 
 See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
 [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
@@ -86,6 +97,8 @@ packages/
     editorState.ts                    the document + where the user is in it
   interaction/          @vpb/interaction — drag, resize and snap geometry + lifecycle machines. Headless (E2–E5)
   renderer/             @vpb/renderer — the node tree as escaped React, in a sandboxed iframe (D2/D3)
+  storage/              @vpb/storage — the StorageAdapter contract, its cross-adapter test suite, and
+                                        the in-memory adapter. Headless; depends on @vpb/core only (F1)
   tokens/               @vpb/tokens — design tokens: palette, semantic scale, theme.css
   ui/                   @vpb/ui     — design system: theming, primitives, app shell
 tools/                  repo scripts
@@ -95,7 +108,7 @@ tools/                  repo scripts
   clean.mjs                           remove build output
 ```
 
-Packages arriving later, per the roadmap: `storage`, `export`, `importer`, `plugins`.
+Packages arriving later, per the roadmap: `export`, `importer`, `plugins`.
 
 **`@vpb/core` imports nothing from React, the DOM, or a bundler**, and it never will. The domain
 model has to run in three places the browser is not: Node tests, the Electron main process, and
@@ -281,6 +294,47 @@ Guides never appear on speculation: one is emitted only where an edge genuinely 
 where the minimum-size floor overrules a snap the guide is dropped with it. A line on screen always
 means the box is on it.
 
+### Persistence is a dedicated package, and dirty-state is a checkpoint, not a timestamp
+
+Phase F1 adds `@vpb/storage`, holding the `StorageAdapter` contract, its cross-adapter test suite, and
+an in-memory adapter. The dependency direction is one-way and enforced by what each package is allowed
+to import: `core <- storage <- state <- apps/web`. `@vpb/storage` depends on `@vpb/core` (for
+`DocumentFile` and the branded ids) and nothing else — not `@vpb/state`, not a browser, not a
+filesystem — so `@vpb/state` can orchestrate persistence (`save`/`loadDocument`/`newDocument`) through
+the interface without either package needing to know a concrete adapter exists. A `StorageAdapter`
+moves bytes; it has no schema knowledge (`loadDocument` returns `unknown`, forcing every caller through
+`@vpb/core`'s `deserializeDocumentFile` before anything is trusted), no debounce/autosave policy, and no
+dirty-tracking — those live in the store, the same split this codebase already uses for drag and resize
+(a headless "brain" plus a thin host-specific adapter).
+
+**Serialization turns Maps into the arrays they already had constructors for.** `NodeTree.nodes`,
+`StyleSheet.rules`, and `AssetLibrary.assets` are all `Map`s, and `JSON.stringify` drops a `Map`'s
+entries silently. `createStyleSheet` and `createAssetLibrary` already rebuild their structures from an
+array; the one genuinely missing piece was `buildNodeTree`, which derives `NodeTree.parents` from a flat
+`Node[]` the same way every mutator in `tree.ts` already maintains it incrementally. It is deliberately
+*mechanical* — it does not validate — because `deserializeProject` runs the untrusted result through the
+same `validateTree` every other tree-producing operation is checked against, plus `validateStyleSheet`,
+`validateBreakpointSet`, and the already-existing `validateProject`. A hand-written shape check catches
+the common corruption (a missing field, a wrong type) with a specific message; anything deeper that
+would otherwise throw inside core's own constructors is caught by a try/catch around the whole
+reconstruction — untrusted JSON must never crash the caller, and this codebase has no schema-validation
+dependency to reach for instead of writing that boundary by hand.
+
+**Dirty-state is a reference to a `HistoryEntry`, not a timestamp or a deep comparison.** The store
+records a `saveState` checkpoint — `'never-saved'`, or `{ entry: HistoryEntry | null }` naming whichever
+entry was at the top of `history.past` at the moment of the last successful save or load — and
+`isDirty()` is one reference comparison against the *current* top of `history.past`. This is sound, not
+merely convenient: `undo`/`redo` already move `HistoryEntry` objects between `past` and `future` without
+recreating them, and `@vpb/state`'s commands are already required to be deterministic (nothing mints an
+id inside `apply`, the same rule that makes redo safe) — so the same entry reference at the top of
+`history.past` can only mean the same resulting document. A false "clean" is therefore structurally
+impossible; the only imprecision is a rare, harmless false "dirty" (re-doing an edit identical to one
+truncated by a prior undo), which costs a redundant save, never a lost one. `save()` reads `committed`,
+never `present`, for the same reason it always has: a live drag/resize preview lives only in `present`,
+so a save can never persist an in-flight gesture by construction. Loading or creating a document
+replaces `history` outright with a fresh, empty one — a new baseline, not a command with an inverse,
+because by the time an "undo" of a load would run, the previous document's bytes may already be gone.
+
 ### Tokens are enforced, not documented
 
 `semantic.ts` (TypeScript) and `theme.css` (CSS custom properties) are two representations of one
@@ -310,20 +364,21 @@ package containing Tailwind classes must be added here.**
 
 ## Testing
 
-One runner, four projects, each with the environment it needs (`vitest.config.ts`):
+One runner, one project per package, each with the environment it needs (`vitest.config.ts`):
 
 | Project    | Environment | Covers                                                  | Status          |
 | ---------- | ----------- | ------------------------------------------------------- | --------------- |
-| `core`     | node        | The model: style, cascade, compiler, tree, document     | 527 tests       |
-| `state`    | node        | Commands, inverses, history, batching, the store        | 185 tests       |
+| `core`     | node        | The model: style, cascade, compiler, tree, document, serialization (F1) | 544 tests |
+| `state`    | node        | Commands, inverses, history, batching, the store, save/load/isDirty (F1) | 202 tests |
 | `interaction` | node     | Drag, resize and snap geometry, and the state machines   | 73 tests        |
+| `storage`  | node        | The `StorageAdapter` contract, the in-memory adapter (F1) | 7 tests       |
 | `renderer` | jsdom       | Escaped rendering, the sandboxed frame, the hit-test handle | 52 tests     |
 | `tokens`   | node        | Token contract, CSS/TS parity, colour distinction       | 48 tests        |
 | `ui`       | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard      | 34 tests        |
 | `web`      | jsdom       | Canvas wiring (D4), selection (E1), drag/resize/keyboard/snap controllers (E2–E5) | 81 tests |
 
 ```bash
-pnpm test                        # everything (1000 today)
+pnpm test                        # everything (1041 today)
 pnpm vitest run --project core   # one project
 ```
 
@@ -355,7 +410,7 @@ pnpm mutate --list         # show what would run, change nothing
 pnpm mutate --filter cycle # one mutation by name
 ```
 
-Every phase is built this way; **186 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
+Every phase is built this way; **204 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
 C, 12 for D1, 12 for D2 (the renderer: escaping, `isSafeUrl`, the `componentId -> React` map), 9 for D3
 (the sandboxed frame: the `sandbox` attribute, incremental reconciliation), 8 for D4 (the app wiring:
 `present` vs `committed`, the active page, the per-page node filter, device sizing), 7 for E1 (the
@@ -374,7 +429,14 @@ centre's double rate, nearest-wins, per-axis independence, the inversion guard, 
 and both halves of the aspect rule; the machine: the floor overruling a snap, and a guide outliving the
 clamp that overrode it; the app: **snapping disconnected entirely**, guides outliving the gesture, a box
 offered its own edges, descendants instead of siblings, the container's lines dropped, a fixed origin,
-and a guide drawn perpendicular to the edge it marks).
+and a guide drawn perpendicular to the edge it marks), and 18 for F1 (serialize/deserialize: a dropped
+`classOrder`, an unsupported schema version accepted, the final `validateProject` check dropped,
+`buildNodeTree` losing the whole parent index, a broken page tree accepted, the try/catch safety net
+rethrowing instead of returning a typed error, a migration failure ignored; the in-memory adapter and
+its contract: overwrite, delete, the `not-found` error kind, asset-byte delete, a dropped document name;
+and the store: **`save()` persisting `present` instead of `committed`**, the checkpoint failing to
+re-anchor to the current history tail, `isDirty()`'s `never-saved` case and its comparison both
+individually inverted, a load that skips validation, and `newDocument` ignoring the given name).
 
 Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
 their first run, which proves only that they were written against code that already passed them.
@@ -459,7 +521,7 @@ the code still compiles and the tests still pass — which is precisely why it i
 | **C**  | **Commands, inverse-command history, Zustand store — headless and testable. ✅** |
 | **D**  | **Renderer + style compiler + sandboxed canvas, wired into the app; the shared-compiler WYSIWYG invariant. ✅ Done.** |
 | **E** | **Interaction: overlay, structural drag, resize, multi-select ops + batching, snap guides. ✅ Done (E1–E5).** |
-| F     | Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets  |
+| **F** | **Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets. F1 (contract + serialize + store, headless) ✅. F2 (real IndexedDB + autosave), F3 (assets), F4 (desktop interface) next.** |
 | G     | HTML/CSS importer — the validator of the Phase B model                      |
 | H     | Style panel + component library                                             |
 | I     | Export: HTML/CSS/JS/ZIP/JSON via the shared compiler, then PNG/JPG/SVG/PDF  |

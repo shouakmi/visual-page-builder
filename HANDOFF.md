@@ -10,8 +10,9 @@ the news.
 
 ## Where we are
 
-**Phases A–E COMPLETE. E1 (selection), E2 (drag), E3 (resize), E4 (multi-select ops + batching) and
-E5 (snap guides) have all landed; Phase F (persistence) is next.**
+**Phases A–E COMPLETE. Phase F1 (persistence: contract + serialization + headless store wiring) is
+implemented and fully green, and is sitting UNCOMMITTED pending review/approval — see "Phase F" below
+before doing anything else.**
 Click to select, shift/ctrl to multi-select, a tracking overlay. Drag: `dropTarget` (where),
 `dragMachine` (when), `dragController` + the `resolveDrop` DOM adapter, pointer capture, a live
 `DropIndicator`. Resize: eight `ResizeHandles` grips → `resizeSize` (how big: edge direction, min
@@ -23,25 +24,31 @@ pinned by **stubbed-layout tests** that feed known rects and by the `e2-app`/`e3
 E4 adds `batchCommand` — several commands, ONE history entry, one combined inverse run backwards —
 plus multi-delete, arrow-key sibling reorder, and the shortcut layer (Delete, Escape, Ctrl+Z/Y).
 E5 adds snapping to the resize: `snapCandidates`/`snapSize` (which line, and the guide that explains
-it), `snapTargets` (the DOM adapter), and `SnapGuides` (the overlay). **Phase E is closed; Phase F
-(persistence) is next.** See the Phase E section.
+it), `snapTargets` (the DOM adapter), and `SnapGuides` (the overlay). **Phase E is closed.** Phase F1
+adds a new `@vpb/storage` package (the `StorageAdapter` contract, its cross-adapter test suite, and an
+in-memory adapter), `@vpb/core` serialization (`serializeProject`/`deserializeProject`/
+`deserializeDocumentFile`, schema-versioned, two validation layers) plus the `buildNodeTree` seam it
+needed, and `@vpb/state` store orchestration (`save`/`loadDocument`/`newDocument`/`isDirty`) built on a
+dirty-state checkpoint proved correct transition-by-transition before it was written. See the Phase F
+section below for the full design record and what's still open (F2–F4).
 
 | | |
 | --- | --- |
-| Last session | 2026-07-22 — E5 shipped: `snapGuides` + the machine's snap step (`@vpb/interaction`), `snapTargets` + `SnapGuides` + controller/Canvas wiring (`apps/web`), tests, and the `e5-snap`/`e5-app` mutation sets |
-| Git | branch **`phase-c`**, ahead of `main` @ `6da69ce`; HEAD is the E5 commit `f50fe43`, on top of `b65c5cf` (E4). **Not pushed, not merged.** Rename to `phase-e` or merge — it now carries all of D and all of E. |
-| Working tree | Clean (E5 + these doc updates committed) |
-| `pnpm verify` | Green — typecheck, lint, encoding, **1000 tests across 46 files**, build (verified locally 2026-07-22) |
-| `pnpm mutate` | Green — **186/186 caught**, zero survivors, zero stale, zero ambiguous, exit 0 (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14, E4 16, E5 17) |
+| Last session | 2026-07-23 — F1 implemented: `@vpb/storage` (new package), `@vpb/core` serialize/deserialize + `buildNodeTree`, `@vpb/state` save/loadDocument/newDocument/isDirty, the `f1-serialize`/`f1-storage`/`f1-store` mutation sets. **Not yet committed** — stopped for review per the approved plan. |
+| Git | branch **`phase-e`** (renamed from `phase-c` this session, HEAD unchanged), ahead of `main` @ `6da69ce`; HEAD is still the E5 commit `f50fe43`. **Not pushed, not merged.** F1's changes are uncommitted in the working tree. |
+| Working tree | **Dirty** — F1's new/modified files are staged for review, not yet committed (see "Phase F" below for the exact file list) |
+| `pnpm verify` | Green — typecheck, lint, encoding, **1041 tests across 48 files**, build (verified locally 2026-07-23, with F1's changes in the working tree) |
+| `pnpm mutate` | Green — **204/204 caught**, zero survivors, zero stale, zero ambiguous, exit 0 (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14, E4 16, E5 17, **F1 18**) |
 
-Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), and all of **E** (E1 selection, E2
-structural drag, E3 resize, E4 multi-select ops + batching, E5 snap guides).
+Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), all of **E** (E1 selection, E2
+structural drag, E3 resize, E4 multi-select ops + batching, E5 snap guides), and **F1** (persistence
+contract + serialization + headless store wiring — uncommitted, awaiting review).
 
-> Test counts by project: `core` 527, `state` 185, `interaction` 73, `renderer` 52, `tokens` 48,
-> `ui` 34, `web` 81 = 1000.
+> Test counts by project: `core` 544, `state` 202, `interaction` 73, `storage` 7, `renderer` 52,
+> `tokens` 48, `ui` 34, `web` 81 = 1041.
 >
-> The branch is still named `phase-c` and now carries all of D and all of E. Rename or merge
-> before it gets confusing.
+> The branch is now `phase-e` (renamed this session, per the approved Phase F design review) and
+> carries all of D, all of E, and F1's uncommitted working-tree changes.
 
 **The canvas is interactive.** On top of the D4 wiring (`Canvas.tsx` reads `present`, compiles with
 `compileStyleSheet`, renders through `RenderChildren` inside a `CanvasFrame`, sizes to the active
@@ -226,8 +233,8 @@ The phase's spec (AUDIT §8) is met. What remains is deliberate scope, not omiss
 - **`git core.autocrlf=true` on this machine.** Harmless so far — commits contain only real changes —
   but the mutation harness writes LF and every `git add` prints conversion warnings. Worth an
   `.gitattributes` if it ever bites.
-- **`phase-c` is unpushed and unmerged, and now carries all of D plus E1 and the E2 decision layer.**
-  19 commits ahead of `main`.
+- **`phase-e`** (renamed from `phase-c` in the F1 session) **is unpushed and unmerged, and now carries
+  all of D, all of E, and F1's uncommitted changes.** 19 commits ahead of `main`, plus F1 pending.
 - **B2's mutation set did not exist** until `1bc94c7`, despite the README claiming "B2 and B3 were
   both built this way". It was presumably lost with the two suites in the 2026-07-17 incident, and
   nothing noticed — **a missing mutation set fails silently by definition.** `b2-cascade.mjs` now
@@ -236,6 +243,101 @@ The phase's spec (AUDIT §8) is met. What remains is deliberate scope, not omiss
   declarations, serialisation) still has no mutation coverage.
 
 These items are still deferred as noted; none of them blocks Phase E.
+
+---
+
+## Phase F — where it stands
+
+**F1 implemented, verified, and UNCOMMITTED — stopped for review per the approved plan.** The design
+review (six decisions: `@vpb/storage` as a new package from day one; real desktop SQLite deferred to
+Phase J; content-hash asset dedup deferred; no crash-recovery journal in F; branch renamed
+`phase-c` → `phase-e`; minimal persistence UI deferred to F2) and the follow-up formal review of the
+dirty-state invariant are both recorded in the plan file used to design this slice — ask for it if it is
+not still around, or reconstruct from this section, which carries the load-bearing conclusions forward.
+
+**Package boundary, enforced by what each package is allowed to import:**
+`core <- storage <- state <- apps/web`. `@vpb/storage` depends on `@vpb/core` only — not `@vpb/state`,
+not a browser, not a filesystem. Concrete adapters (the in-memory one today, IndexedDB in F2) live IN
+`@vpb/storage`, not in `apps/web` — `apps/web` only constructs the adapter it needs and wires UI around
+it, the same shape as every other host-specific seam in this codebase.
+
+### What F1 shipped
+
+- **`packages/storage/`** (new package) — `storageAdapter.ts` (the `StorageAdapter` interface,
+  `StorageError`, `StorageResult<T>`, `DocumentSummary`), `memoryStorageAdapter.ts` (in-process,
+  `structuredClone`s on every read/write so a test can never pass because two calls happened to share a
+  reference — the same reasoning IndexedDB's real structured-clone semantics will enforce for real in
+  F2), and `storageAdapter.contract.ts` — ONE shared test suite (`runStorageAdapterContractTests`)
+  every adapter runs from its own `__tests__` file, so two adapters can never silently diverge. Not
+  exported from the package's public barrel (`index.ts`) on purpose: it imports `vitest`, a
+  devDependency, and re-exporting it would pull test infrastructure into any real consumer's module
+  graph. 7 tests.
+- **`packages/core/src/document/serialize.ts`** (new) — `serializeProject`/`deserializeProject`/
+  `deserializeDocumentFile`, `SCHEMA_VERSION = 1` with an empty-but-real `MIGRATIONS` chain (the
+  mechanism has to exist before the first real user document does, not after). Two validation layers
+  always both, always in that order: hand-written shape checks (this codebase has no schema-validation
+  dependency), then the ALREADY-EXISTING `validateTree`/`validateStyleSheet`/`validateBreakpointSet`/
+  `validateProject`. Never throws past its boundary — a try/catch around the reconstruction converts
+  anything a shape check missed (a rule whose `scope` is present but not an object, say) into a typed
+  `DeserializeError` instead of crashing the caller. `loadDocument`'s `unknown` return type is what
+  forces every caller through this — an adapter is never trusted to have validated anything itself.
+- **`packages/core/src/node/tree.ts`** — `buildNodeTree(nodes, root)`, the one new primitive
+  deserialization actually needed: derives `NodeTree.parents` from a flat `Node[]`, mechanically, with
+  NO validation of its own (a dangling child reference is accepted, not thrown on) — `validateTree`
+  afterward is what catches it. Deliberately narrow; no second, broader tree-construction API was added.
+- **`packages/state/src/store.ts`** — `save()`/`loadDocument()`/`newDocument()`/`isDirty()`, plus
+  `EditorStoreOptions.storage?: StorageAdapter` (absent means no persistence; `save`/`loadDocument`
+  resolve `io-error`, never throw) and a `saveState: SaveState` checkpoint (`'never-saved'` or
+  `{ entry: HistoryEntry | null }`). `save()` reads `committed`, never `present` — the load-bearing
+  property the whole dirty-state review turned on, since a live drag/resize preview lives only in
+  `present`, so a save can never persist an in-flight gesture BY CONSTRUCTION. `loadDocument`/
+  `newDocument` fully validate (or construct) before any `set()` call, and both replace `history`
+  outright with a fresh, empty one — a NEW baseline, not a command with an inverse, since there is
+  nothing that could sensibly undo "open a different document." A failed `save`/`loadDocument` leaves
+  every field of the store — including `saveState` — byte-identical to before the call.
+- **Dirty-state, proved not asserted.** `isDirty()` is one `O(1)` reference comparison
+  (`history.past.at(-1) !== saveState.entry`), sound because `undo`/`redo` already move `HistoryEntry`
+  objects between `past`/`future` by reference rather than recreating them, and commands are already
+  required to be deterministic (nothing mints an id inside `apply` — the same guarantee that makes redo
+  safe). Walked transition-by-transition before being written: initial/never-saved, first save, edit
+  after save, undo-to-saved, redo-away, save-after-undo (re-anchors to the CURRENT tail, not the
+  pre-undo one), a new edit after undo-truncate, coalescing after save, history-cap eviction, preview/
+  context changes (neither touches `isDirty()`), and the cross-session case (moot — `History` is never
+  persisted, so a load always establishes checkpoint and history together, atomically, in one session).
+  No false "clean" is possible; the only imprecision is a benign false "dirty" in one narrow edge case,
+  which costs a redundant save, never a lost one.
+- **Mutations**: `tools/mutations/f1-serialize.mjs` (core, 7), `f1-storage.mjs` (storage, 5),
+  `f1-store.mjs` (state, 6) — 18, all caught. The highest-value one:
+  *`save()` persists `present` instead of `committed`* — caught by a dedicated test that saves mid-preview
+  and asserts the reloaded document does NOT carry the previewed value.
+
+### Deviations from the approved plan (all naming/shape refinements, no behaviour or scope change)
+
+- The plan's `DocumentFile.project: ProjectFileV1` (JSON-safe) round-trip was split into two clearer
+  functions: `deserializeProject` (untrusted JSON -> domain `Project`, standalone — the Phase G importer
+  will call this directly with no document envelope around it) and `deserializeDocumentFile` (untrusted
+  envelope -> `LoadedDocument { schemaVersion, id, updatedAt, project: Project }`, ready for the store
+  with no redundant second deserialize call needed at the call site).
+- `StorageAdapter.loadDocument` returns `Promise<StorageResult<unknown>>`, not `DocumentFile` — the
+  untrusted boundary is enforced by the TYPE (an adapter round-trips JSON-safe bytes faithfully but must
+  not appear to have validated their meaning), not merely by convention.
+- Concrete adapters (today: the in-memory one) live in `@vpb/storage` itself, not `apps/web` — a
+  tightening of the v1 draft, consistent with `@vpb/storage` owning storage-layer code rather than
+  application code.
+
+### What's next — F2, F3, F4
+
+Unchanged from the approved plan: **F2** (real `IndexedDbStorageAdapter` in `@vpb/storage`, tested via
+`fake-indexeddb`; the autosave/debounce controller in `@vpb/state`, guarded so it can never fire while
+`pending !== null`; the smallest New/Save/Open UI in `apps/web` needed to manually verify the adapter in
+a real browser). **F3** (asset commands, real asset-byte storage on the IndexedDB adapter,
+`orphanedAssets` in core, missing-asset degradation in the renderer — content-hash dedup deferred, but
+the API is shaped so it can be added later without a breaking change). **F4** (the `StorageAdapter`
+contract proven against a desktop-shaped fake; a written plan for Phase J's real SQLite — no Electron,
+no `better-sqlite3`, no Node-specific DB code introduced in F).
+
+**Not done yet, and deliberately not attempted in F1:** any browser API (no IndexedDB), autosave, asset
+commands, UI, Electron, SQLite. F1 is entirely headless by design, per the approved scope.
 
 ---
 
@@ -453,8 +555,8 @@ tests and the mutation sets are the real verification.
 
 ### Still to do in Phase E
 
-Nothing — E1 through E5 are all complete. **Phase F (persistence: `StorageAdapter` → IndexedDB +
-SQLite, assets) is next.**
+Nothing — E1 through E5 are all complete. **Phase F1 (persistence contract + serialization + headless
+store wiring) has since landed — see the "Phase F" section above.**
 
 Two pieces of browser-pending confirmation carry forward out of the phase, none of them coverage gaps:
 a real pointer drag reordering a node on screen (E2), a real grip resize (E3), and a real snap with its

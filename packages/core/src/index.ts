@@ -301,6 +301,7 @@ export type { Node } from './node/node.ts';
 /* Node — tree */
 export {
   createTree,
+  buildNodeTree,
   getNode,
   hasNode,
   nodeCount,
@@ -387,3 +388,21 @@ export {
   validateProject,
 } from './document/project.ts';
 export type { Project, ProjectSettings } from './document/project.ts';
+
+/* Document — serialization (Phase F1). Maps <-> JSON-safe arrays, schema-versioned. */
+export {
+  SCHEMA_VERSION,
+  serializeProject,
+  createDocumentFile,
+  deserializeProject,
+  deserializeDocumentFile,
+} from './document/serialize.ts';
+export type {
+  PageFileV1,
+  ProjectFileV1,
+  DocumentFile,
+  LoadedDocument,
+  DeserializeError,
+  DeserializeProjectResult,
+  DeserializeDocumentResult,
+} from './document/serialize.ts';
