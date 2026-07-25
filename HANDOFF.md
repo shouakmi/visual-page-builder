@@ -10,9 +10,10 @@ the news.
 
 ## Where we are
 
-**Phases A–E COMPLETE. Phase F1 (persistence: contract + serialization + headless store wiring) is
-implemented and fully green, and is sitting UNCOMMITTED pending review/approval — see "Phase F" below
-before doing anything else.**
+**Phases A–E COMPLETE, and Phase F persistence through F2 COMPLETE. F1 (contract + serialization +
+headless store wiring) is COMMITTED as `8083c7b`; F2 (real IndexedDB adapter + autosave + New/Save/Open
+UI) is implemented, fully green, and sitting UNCOMMITTED in the working tree pending review/approval —
+see "Phase F" below before doing anything else.**
 Click to select, shift/ctrl to multi-select, a tracking overlay. Drag: `dropTarget` (where),
 `dragMachine` (when), `dragController` + the `resolveDrop` DOM adapter, pointer capture, a live
 `DropIndicator`. Resize: eight `ResizeHandles` grips → `resizeSize` (how big: edge direction, min
@@ -29,26 +30,30 @@ adds a new `@vpb/storage` package (the `StorageAdapter` contract, its cross-adap
 in-memory adapter), `@vpb/core` serialization (`serializeProject`/`deserializeProject`/
 `deserializeDocumentFile`, schema-versioned, two validation layers) plus the `buildNodeTree` seam it
 needed, and `@vpb/state` store orchestration (`save`/`loadDocument`/`newDocument`/`isDirty`) built on a
-dirty-state checkpoint proved correct transition-by-transition before it was written. See the Phase F
-section below for the full design record and what's still open (F2–F4).
+dirty-state checkpoint proved correct transition-by-transition before it was written. Phase F2 adds the
+real `IndexedDbStorageAdapter` (in `@vpb/storage`, injecting its `IDBFactory` so it stays node-testable
+via `fake-indexeddb`), the `createAutosaveController` debounce/trailing policy in `@vpb/state`, and the
+minimal `DocumentBar` New/Save/Open UI + `persistence.ts` browser wiring in `apps/web`. See the Phase F
+section below for the full design record and what's still open (F3–F4).
 
 | | |
 | --- | --- |
-| Last session | 2026-07-23 — F1 implemented: `@vpb/storage` (new package), `@vpb/core` serialize/deserialize + `buildNodeTree`, `@vpb/state` save/loadDocument/newDocument/isDirty, the `f1-serialize`/`f1-storage`/`f1-store` mutation sets. **Not yet committed** — stopped for review per the approved plan. |
-| Git | branch **`phase-e`** (renamed from `phase-c` this session, HEAD unchanged), ahead of `main` @ `6da69ce`; HEAD is still the E5 commit `f50fe43`. **Not pushed, not merged.** F1's changes are uncommitted in the working tree. |
-| Working tree | **Dirty** — F1's new/modified files are staged for review, not yet committed (see "Phase F" below for the exact file list) |
-| `pnpm verify` | Green — typecheck, lint, encoding, **1041 tests across 48 files**, build (verified locally 2026-07-23, with F1's changes in the working tree) |
-| `pnpm mutate` | Green — **204/204 caught**, zero survivors, zero stale, zero ambiguous, exit 0 (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14, E4 16, E5 17, **F1 18**) |
+| Last session | 2026-07-23 — F2 implemented across four approved slices: A `IndexedDbStorageAdapter` (`@vpb/storage`), B `createAutosaveController` (`@vpb/state`), C `DocumentBar`/`persistence.ts` (`apps/web`), D the `f2-indexeddb`/`f2-autosave`/`f2-ui` mutation sets + these docs. **Not yet committed** — stopped for review per the approved plan. F1 beneath it is committed as `8083c7b`. |
+| Git | branch **`phase-e`**, **29 commits ahead of `main` @ `6da69ce`**; HEAD is the F1 commit **`8083c7b`**. **Not pushed, not merged.** F2's changes are uncommitted in the working tree. |
+| Working tree | **Dirty** — F2's new/modified files, not yet committed (see "Phase F → What F2 shipped" for the exact file list). `.claude/settings.local.json` is also modified and is deliberately excluded from commits. |
+| `pnpm verify` | Green — typecheck, lint, encoding, **1078 tests across 52 files**, build (verified locally 2026-07-23, with F2's changes in the working tree) |
+| `pnpm mutate` | Green — **224/224 caught**, zero survivors, zero stale, zero ambiguous, exit 0 (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14, E4 16, E5 17, F1 18, **F2 20**) |
 
 Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), all of **E** (E1 selection, E2
-structural drag, E3 resize, E4 multi-select ops + batching, E5 snap guides), and **F1** (persistence
-contract + serialization + headless store wiring — uncommitted, awaiting review).
+structural drag, E3 resize, E4 multi-select ops + batching, E5 snap guides), **F1** (persistence
+contract + serialization + headless store wiring — committed `8083c7b`), and **F2** (IndexedDB adapter +
+autosave + New/Save/Open UI — uncommitted, awaiting review).
 
-> Test counts by project: `core` 544, `state` 202, `interaction` 73, `storage` 7, `renderer` 52,
-> `tokens` 48, `ui` 34, `web` 81 = 1041.
+> Test counts by project: `core` 544, `state` 212, `interaction` 73, `storage` 21, `renderer` 52,
+> `tokens` 48, `ui` 34, `web` 94 = 1078.
 >
-> The branch is now `phase-e` (renamed this session, per the approved Phase F design review) and
-> carries all of D, all of E, and F1's uncommitted working-tree changes.
+> The branch is `phase-e` and carries all of D, all of E, the committed F1 (`8083c7b`), and F2's
+> uncommitted working-tree changes.
 
 **The canvas is interactive.** On top of the D4 wiring (`Canvas.tsx` reads `present`, compiles with
 `compileStyleSheet`, renders through `RenderChildren` inside a `CanvasFrame`, sizes to the active
@@ -248,7 +253,7 @@ These items are still deferred as noted; none of them blocks Phase E.
 
 ## Phase F — where it stands
 
-**F1 implemented, verified, and UNCOMMITTED — stopped for review per the approved plan.** The design
+**F1 COMMITTED (`8083c7b`); F2 implemented, verified, and UNCOMMITTED — stopped for review per the approved plan.** The F1 design
 review (six decisions: `@vpb/storage` as a new package from day one; real desktop SQLite deferred to
 Phase J; content-hash asset dedup deferred; no crash-recovery journal in F; branch renamed
 `phase-c` → `phase-e`; minimal persistence UI deferred to F2) and the follow-up formal review of the
@@ -257,9 +262,9 @@ not still around, or reconstruct from this section, which carries the load-beari
 
 **Package boundary, enforced by what each package is allowed to import:**
 `core <- storage <- state <- apps/web`. `@vpb/storage` depends on `@vpb/core` only — not `@vpb/state`,
-not a browser, not a filesystem. Concrete adapters (the in-memory one today, IndexedDB in F2) live IN
-`@vpb/storage`, not in `apps/web` — `apps/web` only constructs the adapter it needs and wires UI around
-it, the same shape as every other host-specific seam in this codebase.
+not a browser, not a filesystem. Concrete adapters (the in-memory one AND the IndexedDB one, both shipped)
+live IN `@vpb/storage`, not in `apps/web` — `apps/web` only constructs the adapter it needs and wires UI
+around it, the same shape as every other host-specific seam in this codebase.
 
 ### What F1 shipped
 
@@ -325,19 +330,119 @@ it, the same shape as every other host-specific seam in this codebase.
   tightening of the v1 draft, consistent with `@vpb/storage` owning storage-layer code rather than
   application code.
 
-### What's next — F2, F3, F4
+### What F2 shipped
 
-Unchanged from the approved plan: **F2** (real `IndexedDbStorageAdapter` in `@vpb/storage`, tested via
-`fake-indexeddb`; the autosave/debounce controller in `@vpb/state`, guarded so it can never fire while
-`pending !== null`; the smallest New/Save/Open UI in `apps/web` needed to manually verify the adapter in
-a real browser). **F3** (asset commands, real asset-byte storage on the IndexedDB adapter,
-`orphanedAssets` in core, missing-asset degradation in the renderer — content-hash dedup deferred, but
-the API is shaped so it can be added later without a breaking change). **F4** (the `StorageAdapter`
-contract proven against a desktop-shaped fake; a written plan for Phase J's real SQLite — no Electron,
-no `better-sqlite3`, no Node-specific DB code introduced in F).
+- **`packages/storage/src/indexedDbStorageAdapter.ts`** (new) — `createIndexedDbStorageAdapter({ factory,
+  name?, version? })`. **Injects its `IDBFactory`** and never reads a global `indexedDB`, which is what
+  keeps the `storage` Vitest project runnable in node (where `indexedDB` is undefined) — a RUNTIME gate,
+  since `tsconfig.base.json` already carries the DOM lib types. Runs the SAME
+  `runStorageAdapterContractTests` suite the memory adapter runs, plus IndexedDB-specific tests
+  (cross-instance persistence, document/asset store separation, the not-same-reference clone,
+  open-failure→`io-error`, retry-after-failed-open, and the quota/corrupt error-name mapping). One
+  transaction per call resolved on `transaction.oncomplete` — no `await` of a non-IDB promise
+  mid-transaction, which auto-closes it — errors mapped to `StorageError` by DOMException NAME, and a
+  failed open clears the cached connection so a later call retries. 14 tests (7 shared contract + 7
+  specifics).
+- **`packages/state/src/autosave.ts`** (new) — `createAutosaveController(store, { debounceMs?, setTimer?,
+  clearTimer?, onSettled? })`. Debounces edits into `save()` through an INJECTED timer seam (tests drive
+  it; no real timers, no `vi.mock`). Guarantees, each mutation-pinned: never saves while `pending !==
+  null`; never overlaps a save (notifications ignored while one runs, INCLUDING the store's own `set`
+  inside `save()`); always trails an edit that landed during a save (post-save `isDirty()` re-arms). A
+  throwing `onSettled` is contained in a try/catch so it can neither reject the save chain nor skip the
+  trailing save. A failed save is not retried in a loop — the next change re-arms it. `dispose()` cancels
+  the armed timer and unsubscribes. 10 tests.
+- **`apps/web/src/DocumentBar.tsx`** + **`apps/web/src/persistence.ts`** (new) — the minimal New/Save/Open
+  toolbar with a dirty indicator, and the browser wiring. `persistence.ts` isolates the two
+  browser-specific concerns: `createBrowserStorage(factory)` (the one place `window.indexedDB` is read —
+  in `App.tsx` — passed in) and `attachAutosave(store, adapter)` (autosave attached ONLY when an adapter
+  exists). App wiring is module-scope (store/adapter/ids created once, not per render) with
+  `import.meta.hot.dispose` disposing the controller on HMR. The UI never presents a failure as success:
+  a failed `listDocuments` shows an error, NOT an empty "no documents" list; failed `save`/`loadDocument`
+  show errors; a synchronous in-flight ref refuses overlapping actions. Opening routes through
+  `store.loadDocument` (validation + history reset in one place); the app holds the adapter only for
+  `listDocuments`. 13 tests (9 DocumentBar + 4 persistence).
+- **Mutations**: `tools/mutations/f2-indexeddb.mjs` (storage, 7), `f2-autosave.mjs` (state, 6),
+  `f2-ui.mjs` (web, 7) — 20, all caught. Highest-value: *a failed document list reads as an empty list
+  instead of an error* (the exact defect this slice's review caught and fixed) and *the in-flight flag is
+  never set, so a save can overlap another*.
+
+### F2 review findings folded in
+
+Four review rounds hardened F2 beyond the first cut; each finding below became code plus a focused test:
+
+- **A throwing `onSettled` was a real defect** — it skipped the trailing save and rejected the save chain
+  (an unhandled rejection). Hardened with a try/catch around the callback.
+- **`listDocuments` failure shown as an empty list, and `loadDocument` failure swallowed, were real UI
+  defects** — a failed operation must never look like success. Both now surface an error; overlapping
+  actions are refused by a synchronous ref because React state updates too late to guard a double-click.
+- **Autosave lifecycle** — store/adapter are module-scope (never recreated per render); the controller is
+  disposed on Vite HMR so a hot-replaced module cannot leave an armed timer against a discarded store.
+- **Error-mapping coverage** — the `DataCloneError → corrupt` path is exercised through the real public
+  write path; the `QuotaExceededError → quota-exceeded` path uses the smallest justified seam, since
+  fake-indexeddb enforces no quota and a real one cannot be provoked from it.
+
+### What's next — F3, F4
+
+Unchanged from the approved plan. **F3** (asset commands, real asset-byte storage on the IndexedDB
+adapter — the `saveAssetBytes`/`loadAssetBytes`/`deleteAssetBytes` contract already exists and is
+contract-tested, but no product code writes assets yet — `orphanedAssets` in core, missing-asset
+degradation in the renderer; content-hash dedup deferred, but the API is shaped so it can be added later
+without a breaking change). **F4** (the `StorageAdapter` contract proven against a desktop-shaped fake; a
+written plan for Phase J's real SQLite — no Electron, no `better-sqlite3`, no Node-specific DB code
+introduced in F).
+
+**Owed opportunistically (not a coverage gap):** on-screen confirmation of the real IndexedDB adapter +
+autosave + New/Save/Open in a paintable browser. jsdom does no layout and the Browser pane never paints
+here (memory `browser-pane-tabs-never-paint`), so `fake-indexeddb` in node + the mutation sets are the
+verification; no human has watched a real save/reopen round-trip in this environment.
 
 **Not done yet, and deliberately not attempted in F1:** any browser API (no IndexedDB), autosave, asset
 commands, UI, Electron, SQLite. F1 is entirely headless by design, per the approved scope.
+
+---
+
+## Phase F3 — where it stands
+
+F3 is being built as the smallest-safe-slice sequence used for E2/E3/E5. Slice ledger:
+
+- **Slice A — Core** ✅ (asset model, `usedAssets`/`orphanedAssets` reporting)
+- **Slice B — Storage** ✅ (`saveAssetBytes`/`loadAssetBytes`/`deleteAssetBytes`/`listAssetIds` exercised
+  for real on the IndexedDB adapter)
+- **Slice C — Asset Resolver** ✅ (`apps/web/src/assetResolver.ts`: the host-side `asset:<id>` → `blob:`
+  bridge, object-URL lifecycle owned end to end; built and unit-tested, wired to the canvas by Slice F)
+- **Slice D — Asset Commands** ✅ (`addAssetCommand`/`removeAssetCommand`/`renameAssetCommand`; removal
+  leaves bytes for load-time GC by design)
+- **Slice E — Upload pipeline + AssetPanel** ✅ (host validation, bytes-first upload, duplicate
+  filenames, missing/referenced indicators, inline rename, delete confirmation, app integration)
+- **Slice F — Canvas Asset Resolver Integration (the read path)** ✅ (the milestone below)
+
+### F3 milestone — Canvas Asset Resolver Integration (the read path) — DONE
+
+Slice C built the resolver seam; Slice F wires it in. `App.tsx` instantiates the resolver at
+**application scope** (module scope, not per-render) via `createAssetResolver`, and disposes it —
+alongside the autosave controller — in `import.meta.hot.dispose`, so a hot-replaced module cannot
+strand its object URLs. `apps/web/src/useResolvedAssets.ts` is the hook that drives it: it re-resolves
+whenever the model's `AssetLibrary` changes, reusing cached URLs for unchanged ids, and returns the raw
+library until a resolve lands (resolving is async) so the render is never blocked. `Canvas.tsx` builds
+its `env` from this **resolved** library (`useResolvedAssets(resolver ?? null, present.project.assets)`)
+instead of the raw `present.project.assets`, so a managed asset's `src` is a live `blob:` URL by the
+time it reaches the renderer, and `RenderTree`'s memoisation still sees a stable `env` identity between
+unrelated edits since `assets` only changes identity when the resolved library does. Object-URL
+lifecycle (creation, reuse, revocation on eviction, and revocation on dispose) is owned end to end
+inside `assetResolver.ts` and is what `tools/mutations/f3-resolver.mjs`'s 5 mutations and
+`tools/mutations/f3-canvas.mjs`'s 4 mutations pin. All responsibilities this milestone owned are
+implemented: application-scope instantiation, lifetime/disposal, resolve-before-Canvas, feeding the
+resolved library, re-resolving on change, preserving `RenderTree` memoisation, and preventing
+object-URL leaks.
+
+**Still open — the one item this milestone does NOT close:** the **load-time byte-GC sweep** is not
+wired. The primitives all exist (`usedAssets`/`orphanedAssets` in core, `listAssetIds` +
+`deleteAssetBytes` on the adapter, removal deferring bytes on purpose), but no load path yet subtracts
+live ids from `listAssetIds` and reaps the orphans. This remains its own F3 slice.
+
+**Owed opportunistically (not blocking closure):** on-screen confirmation in a paintable browser of the
+full round-trip (upload → assign → paint → save → reopen). jsdom does no layout and the Browser pane never
+paints here, so tests + mutation sets are the verification to date.
 
 ---
 

@@ -2,7 +2,7 @@
 
 An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web from one codebase.
 
-> **Status: Phases A–E complete — the canvas is fully interactive.** The workspace
+> **Status: Phases A–E complete, plus web persistence through F2 — the canvas is fully interactive and documents save, autosave, and reopen.** The workspace
 > installs, typechecks, lints, tests, builds, and themes; `@vpb/core` carries the style/cascade/document
 > model (B1–B3) **and the style compiler** (D1), and `@vpb/state` carries commands, undo/redo, and a
 > headless store (C). Phase D closed the loop end to end: `@vpb/renderer` turns the node tree into
@@ -39,8 +39,13 @@ An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web
 > `@vpb/core` and nothing else, so `@vpb/state` can orchestrate persistence without either package
 > knowing a browser or a filesystem exists. The store gains `save`/`loadDocument`/`newDocument`/
 > `isDirty`, and the dirty-state checkpoint is a reference to a `HistoryEntry` rather than a timestamp —
-> sound because commands are already deterministic and undo/redo move entries by reference. F1 is
-> entirely headless; F2 (a real IndexedDB adapter) is next. See the [Roadmap](#roadmap).
+> sound because commands are already deterministic and undo/redo move entries by reference. **Phase F2
+> completes web persistence**: a real `IndexedDbStorageAdapter` (in `@vpb/storage`, injecting its
+> `IDBFactory` so it stays node-testable through `fake-indexeddb`), an autosave controller in `@vpb/state`
+> (debounced through an injected timer seam, never overlapping a save, never firing while a gesture is
+> `pending`, always trailing an edit made during a save), and a minimal New/Save/Open document toolbar in
+> `apps/web` that surfaces every failure rather than presenting it as success. F3 (assets) is next. See
+> the [Roadmap](#roadmap).
 
 See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
 [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
@@ -86,6 +91,8 @@ apps/
     src/snapTargets.ts                E5: reads the page for the lines a resize may align to
     src/SnapGuides.tsx                E5: the guide lines that explain a snap
     src/starterProject.ts             the real Project the editor opens with (not a mock)
+    src/DocumentBar.tsx               F2: minimal New/Save/Open toolbar + dirty/error indicator
+    src/persistence.ts                F2: browser IDBFactory -> adapter, and the autosave attach guard
 packages/
   core/                 @vpb/core   — the domain model. Framework-free, no DOM.
     identity/                         branded ids + injectable factory
@@ -95,10 +102,12 @@ packages/
     document/                         pages, project, asset library
   state/                @vpb/state  — the edit layer: commands, history, store. No React, no DOM.
     editorState.ts                    the document + where the user is in it
+    autosave.ts                       F2: debounce/trailing policy over the store's save()
   interaction/          @vpb/interaction — drag, resize and snap geometry + lifecycle machines. Headless (E2–E5)
   renderer/             @vpb/renderer — the node tree as escaped React, in a sandboxed iframe (D2/D3)
-  storage/              @vpb/storage — the StorageAdapter contract, its cross-adapter test suite, and
-                                        the in-memory adapter. Headless; depends on @vpb/core only (F1)
+  storage/              @vpb/storage — the StorageAdapter contract, its cross-adapter test suite, the
+                                        in-memory adapter (F1), and the IndexedDB adapter (F2). Headless;
+                                        injects its IDBFactory; depends on @vpb/core only
   tokens/               @vpb/tokens — design tokens: palette, semantic scale, theme.css
   ui/                   @vpb/ui     — design system: theming, primitives, app shell
 tools/                  repo scripts
@@ -335,6 +344,48 @@ so a save can never persist an in-flight gesture by construction. Loading or cre
 replaces `history` outright with a fresh, empty one — a new baseline, not a command with an inverse,
 because by the time an "undo" of a load would run, the previous document's bytes may already be gone.
 
+### F2: an IndexedDB adapter that injects its factory, autosave, and a minimal document UI
+
+**The IndexedDB adapter injects its `IDBFactory`; it never reads a global `indexedDB`.**
+`createIndexedDbStorageAdapter({ factory })` takes the factory as a parameter — the browser host passes
+`window.indexedDB`, the tests pass `fake-indexeddb`'s. That is what keeps `@vpb/storage` runnable in
+**node**: the package's Vitest project has no `indexedDB` global, so any real reach for one fails there
+rather than in a future host. `tsconfig.base.json` already carries the DOM lib types, so this is a
+*runtime* gate, not a compile one. The adapter runs the SAME cross-adapter contract suite the memory
+adapter runs (behaviour cannot diverge), does one transaction per call resolved on
+`transaction.oncomplete` — no `await` of a non-IDB promise mid-transaction, which would silently
+auto-close it — and maps every failure to a typed `StorageError` by DOMException NAME
+(`QuotaExceededError` → `quota-exceeded`, `DataCloneError` → `corrupt`, else `io-error`), so it can never
+throw past its boundary. A failed open clears the cached connection so a later call can retry rather than
+being poisoned for the adapter's life.
+
+**Autosave is a debounce/trailing policy over `save()`, and it is disposable.**
+`createAutosaveController(store, options)` (in `@vpb/state`) subscribes to the store and debounces edits
+into saves through an INJECTED timer seam (`setTimer`/`clearTimer`, defaulting to `setTimeout`), so the
+window is driven in tests rather than waited on — the same seam discipline as the store's `now`. Three
+guarantees, each pinned by mutation: it NEVER saves while `pending !== null` (a live drag/resize preview
+owns the document; the commit or cancel re-arms it), it NEVER overlaps a save (notifications are ignored
+while one runs — including the store's OWN `set` inside `save()` — so no second timer is armed, and the
+post-save check re-covers anything that arrived meanwhile), and it always TRAILS an edit that landed
+during a save (a successful save reflects `committed` only as `save()` read it, so a mid-save edit leaves
+the document dirty and re-arms). A failed save is deliberately not retried in a tight loop; the next
+change re-arms it, and the host can surface the error and offer a manual Save. The controller is attached
+ONLY when a storage adapter exists (without one, every edit would fire a pointless `io-error` save), and
+`apps/web` disposes it on Vite HMR (`import.meta.hot.dispose`) so a hot-replaced module cannot leave an
+armed timer against a discarded store. In production there is no earlier owner: the page's lifetime is
+the controller's, and unload needs no teardown.
+
+**The document UI is minimal and never presents a failure as success.** `DocumentBar` (New / Save / Open
+plus a dirty indicator) owns no editor state; it drives the store's existing `newDocument`/`save`/
+`loadDocument` and holds the adapter reference only to LIST documents. Opening still routes through
+`store.loadDocument`, so the untrusted bytes are validated and history is reset in exactly one place. A
+failed `listDocuments` shows an error rather than an empty "no documents" list — the one case where
+failure and success would otherwise look identical — and a failed `save`/`loadDocument` shows an error
+rather than silently doing nothing. A synchronous in-flight ref refuses overlapping actions (React state
+updates too late to guard a double-click). `window.indexedDB` is read at exactly one line in `apps/web`
+and handed to `createBrowserStorage`, keeping every browser-specific concern in the app and out of
+`@vpb/state` and `@vpb/storage`.
+
 ### Tokens are enforced, not documented
 
 `semantic.ts` (TypeScript) and `theme.css` (CSS custom properties) are two representations of one
@@ -369,16 +420,16 @@ One runner, one project per package, each with the environment it needs (`vitest
 | Project    | Environment | Covers                                                  | Status          |
 | ---------- | ----------- | ------------------------------------------------------- | --------------- |
 | `core`     | node        | The model: style, cascade, compiler, tree, document, serialization (F1) | 544 tests |
-| `state`    | node        | Commands, inverses, history, batching, the store, save/load/isDirty (F1) | 202 tests |
+| `state`    | node        | Commands, inverses, history, batching, the store, save/load/isDirty (F1), autosave (F2) | 212 tests |
 | `interaction` | node     | Drag, resize and snap geometry, and the state machines   | 73 tests        |
-| `storage`  | node        | The `StorageAdapter` contract, the in-memory adapter (F1) | 7 tests       |
+| `storage`  | node        | The `StorageAdapter` contract, the in-memory adapter (F1), the IndexedDB adapter (F2) | 21 tests |
 | `renderer` | jsdom       | Escaped rendering, the sandboxed frame, the hit-test handle | 52 tests     |
 | `tokens`   | node        | Token contract, CSS/TS parity, colour distinction       | 48 tests        |
 | `ui`       | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard      | 34 tests        |
-| `web`      | jsdom       | Canvas wiring (D4), selection (E1), drag/resize/keyboard/snap controllers (E2–E5) | 81 tests |
+| `web`      | jsdom       | Canvas wiring (D4), selection (E1), drag/resize/keyboard/snap controllers (E2–E5), persistence UI + wiring (F2) | 94 tests |
 
 ```bash
-pnpm test                        # everything (1041 today)
+pnpm test                        # everything (1078 today)
 pnpm vitest run --project core   # one project
 ```
 
@@ -410,7 +461,7 @@ pnpm mutate --list         # show what would run, change nothing
 pnpm mutate --filter cycle # one mutation by name
 ```
 
-Every phase is built this way; **204 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
+Every phase is built this way; **224 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
 C, 12 for D1, 12 for D2 (the renderer: escaping, `isSafeUrl`, the `componentId -> React` map), 9 for D3
 (the sandboxed frame: the `sandbox` attribute, incremental reconciliation), 8 for D4 (the app wiring:
 `present` vs `committed`, the active page, the per-page node filter, device sizing), 7 for E1 (the
@@ -436,7 +487,14 @@ rethrowing instead of returning a typed error, a migration failure ignored; the 
 its contract: overwrite, delete, the `not-found` error kind, asset-byte delete, a dropped document name;
 and the store: **`save()` persisting `present` instead of `committed`**, the checkpoint failing to
 re-anchor to the current history tail, `isDirty()`'s `never-saved` case and its comparison both
-individually inverted, a load that skips validation, and `newDocument` ignoring the given name).
+individually inverted, a load that skips validation, and `newDocument` ignoring the given name), and 20
+for F2 (the IndexedDB adapter: `add` instead of `put` so overwrite fails, the not-found boundary for both
+documents and asset bytes, a dropped document name, the `quota-exceeded`/`corrupt` error-name mapping,
+and a failed open cached so no later call can retry; the autosave controller: the pending guard, the
+dirty guard, the debounce reset, the trailing save, the in-flight flag, and dispose's timer cancel; the
+persistence UI: **a failed list reading as an empty "no documents" list**, a swallowed save failure, a
+swallowed load failure, New not creating, Open bypassing the store, and the `createBrowserStorage` /
+`attachAutosave` wiring guards).
 
 Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
 their first run, which proves only that they were written against code that already passed them.
@@ -521,7 +579,7 @@ the code still compiles and the tests still pass — which is precisely why it i
 | **C**  | **Commands, inverse-command history, Zustand store — headless and testable. ✅** |
 | **D**  | **Renderer + style compiler + sandboxed canvas, wired into the app; the shared-compiler WYSIWYG invariant. ✅ Done.** |
 | **E** | **Interaction: overlay, structural drag, resize, multi-select ops + batching, snap guides. ✅ Done (E1–E5).** |
-| **F** | **Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets. F1 (contract + serialize + store, headless) ✅. F2 (real IndexedDB + autosave), F3 (assets), F4 (desktop interface) next.** |
+| **F** | **Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets. F1 (contract + serialize + store, headless) ✅. F2 (real IndexedDB adapter + autosave + New/Save/Open UI) ✅. F3 (assets), F4 (desktop interface) next.** |
 | G     | HTML/CSS importer — the validator of the Phase B model                      |
 | H     | Style panel + component library                                             |
 | I     | Export: HTML/CSS/JS/ZIP/JSON via the shared compiler, then PNG/JPG/SVG/PDF  |
