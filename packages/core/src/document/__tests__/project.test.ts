@@ -11,8 +11,8 @@ import { BASE_BREAKPOINT_ID, defaultBreakpoints } from '../../style/breakpoints.
 import { classScope, nodeScope } from '../../style/rule.ts';
 import { EMPTY_STYLESHEET, findRule, ruleCount, setProperty } from '../../style/stylesheet.ts';
 import { target } from '../../style/target.ts';
-import { px } from '../../style/values.ts';
-import { createAssetLibrary } from '../asset.ts';
+import { px, url } from '../../style/values.ts';
+import { createAssetLibrary, type Asset } from '../asset.ts';
 import { createPage, setPageTree } from '../page.ts';
 import {
   addPage,
@@ -22,6 +22,7 @@ import {
   getPage,
   homePage,
   movePage,
+  orphanedAssets,
   orphanedNodeScopes,
   pageAtPath,
   pathInUse,
@@ -317,6 +318,26 @@ describe('usage tracking', () => {
     expect([...usedAssets(next)].sort()).toEqual(['hero', 'icon', 'og']);
   });
 
+  it('finds assets referenced by style rules, not just node props', () => {
+    // A class's background-image lives in the stylesheet, not in any node's
+    // props, so `treeAssets` never sees it. Before this scan existed the asset
+    // looked unused — the data-loss trap for orphan detection.
+    const project = createProject('Site', ids);
+    const styled = setStyles(
+      project,
+      setProperty(
+        project.styles,
+        classScope(C('hero')),
+        BASE,
+        'backgroundImage',
+        url('asset:bg', unsafeId<AssetId>('bg')),
+        ids,
+      ),
+    );
+
+    expect([...usedAssets(styled)]).toContain('bg');
+  });
+
   /** The safety net under removeNode's returned ids and removePage's sweep. */
   it('reports node scopes whose node is gone', () => {
     const project = createProject('Site', ids);
@@ -337,6 +358,72 @@ describe('usage tracking', () => {
     );
 
     expect(orphanedNodeScopes(styled)).toEqual([]);
+  });
+});
+
+describe('orphanedAssets', () => {
+  const asset = (id: string, name: string): Asset => ({
+    id: unsafeId<AssetId>(id),
+    name,
+    mimeType: 'image/png',
+    byteSize: 10,
+    src: `asset:${id}`,
+    createdAt: '2026-07-24T00:00:00.000Z',
+  });
+
+  it('reports a library asset that nothing references', () => {
+    const project = setAssets(
+      createProject('Site', ids),
+      createAssetLibrary([asset('lonely', 'lonely.png')]),
+    );
+
+    expect(orphanedAssets(project).map((a) => a.id)).toEqual(['lonely']);
+  });
+
+  it('does not report an asset used by a node prop', () => {
+    const base = createProject('Site', ids);
+    const page = base.pages[0] as NonNullable<(typeof base.pages)[0]>;
+    const image = createNode(boxComponent, ids, { props: { src: propAsset(unsafeId('used')) } });
+    const withNode = updatePage(
+      base,
+      setPageTree(page, insertNode(page.tree, image, page.tree.root)),
+    );
+    const project = setAssets(withNode, createAssetLibrary([asset('used', 'used.png')]));
+
+    expect(orphanedAssets(project)).toEqual([]);
+  });
+
+  it('does not report an asset used only by a style rule', () => {
+    const base = createProject('Site', ids);
+    const styled = setStyles(
+      base,
+      setProperty(
+        base.styles,
+        classScope(C('hero')),
+        BASE,
+        'backgroundImage',
+        url('asset:bg', unsafeId<AssetId>('bg')),
+        ids,
+      ),
+    );
+    const project = setAssets(styled, createAssetLibrary([asset('bg', 'bg.png')]));
+
+    expect(orphanedAssets(project)).toEqual([]);
+  });
+
+  it('does not report favicon or ogImage assets', () => {
+    let project = setSettings(createProject('Site', ids), { favicon: unsafeId<AssetId>('icon') });
+    const page = project.pages[0] as NonNullable<(typeof project.pages)[0]>;
+    project = updatePageBy(project, page.id, (p) => ({
+      ...p,
+      seo: { ogImage: unsafeId<AssetId>('og') },
+    }));
+    project = setAssets(
+      project,
+      createAssetLibrary([asset('icon', 'icon.png'), asset('og', 'og.png')]),
+    );
+
+    expect(orphanedAssets(project)).toEqual([]);
   });
 });
 

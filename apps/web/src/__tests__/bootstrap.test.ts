@@ -1,3 +1,9 @@
+// @vitest-environment node
+//
+// This suite reads index.html off disk via `import.meta.url`, which is a file://
+// URL only under the node environment. The project defaults to jsdom for the
+// canvas test (which renders an iframe); this file opts back out — it asserts on
+// a static string and wants no DOM.
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 

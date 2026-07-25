@@ -22,8 +22,9 @@ import { referencedAssets } from './props.ts';
  *
  * Because children are ids, a node's subtree is not nested inside it. Editing a
  * node replaces one entry in a shallowly-copied Map — O(nodes) pointer copies,
- * microseconds — instead of deep-cloning the document per keystroke. Phase C
- * replaces even the Map copy with immer patches for structural sharing.
+ * microseconds — instead of deep-cloning the document per keystroke. The Map's
+ * VALUES are shared by reference across versions, so this is already structural
+ * sharing; the copy is of the pointer table alone.
  *
  * `parents` is derived, and derived state maintained incrementally drifts, so
  * every mutation below maintains it in the same breath as `children` and
@@ -38,6 +39,27 @@ export interface NodeTree {
 
 export function createTree(root: Node): NodeTree {
   return { root: root.id, nodes: new Map([[root.id, root]]), parents: new Map() };
+}
+
+/**
+ * Rebuild a tree from a flat node array and its root id — the deserializer's
+ * seam (Phase F1). `parents` is derived by reading every node's `children`,
+ * the same relationship every mutator below maintains incrementally; this is
+ * just that derivation run once over a whole array instead of one edit.
+ *
+ * MECHANICAL ONLY, deliberately: it does not check that the result is a
+ * healthy tree. A node's `children` pointing at a ghost id, two nodes claiming
+ * the same child, a node unreachable from `root` are all accepted here exactly
+ * as they would be if `parents` had been hand-edited in a test. Untrusted
+ * input (a loaded project file) must be passed through `validateTree`
+ * afterward — this function only exists so that call has something to check.
+ */
+export function buildNodeTree(nodes: readonly Node[], root: NodeId): NodeTree {
+  const parents = new Map<NodeId, NodeId>();
+  for (const node of nodes) {
+    for (const childId of node.children) parents.set(childId, node.id);
+  }
+  return { root, nodes: new Map(nodes.map((node) => [node.id, node] as const)), parents };
 }
 
 /* ---------------------------------------------------------------- reading */

@@ -77,6 +77,12 @@ process.on('uncaughtException', (error) => {
 });
 process.on('exit', restoreAll);
 
+/**
+ * Run the suite. `ok` is the EXIT CODE — the verdict — and `out` is for humans.
+ *
+ * A non-zero exit is what "the suite noticed" actually means: the runner decides it,
+ * not us, and it survives colour, locale, reporter and version changes.
+ */
 function run(command) {
   try {
     return { ok: true, out: execSync(command, { cwd: root, encoding: 'utf8', stdio: 'pipe' }) };
@@ -85,13 +91,43 @@ function run(command) {
   }
 }
 
-/** Did the suite report a real, counted failure? */
+/** Vitest colourises its summary; strip escapes before reading numbers out of it. */
+function plain(out) {
+  // eslint-disable-next-line no-control-regex
+  return out.replace(/\u001b\[[0-9;]*m/g, '');
+}
+
+/**
+ * How many tests the suite reported failing — DETAIL ONLY, never the verdict.
+ *
+ * This used to BE the verdict, and that was the bug: scraping human-readable output
+ * is environment-dependent, and when the pattern missed, every mutation scored 0 and
+ * was reported as SURVIVED while the baseline simultaneously looked green. A whole
+ * suite "surviving" while `pnpm verify` passes is that failure, not a test hole.
+ * Returns `null` when the count cannot be read, which is now survivable.
+ */
 function failureCount(out) {
-  const match = out.match(/Tests\s+(\d+) failed/);
+  const text = plain(out);
+  const match = text.match(/Tests\s+(\d+)\s+failed/);
   if (match) return Number(match[1]);
   // A mutation that does not compile is still caught — tsc/vitest refused it.
-  if (/error TS\d+|SyntaxError|Transform failed/.test(out)) return Infinity;
-  return 0;
+  if (/error TS\d+|SyntaxError|Transform failed/.test(text)) return Infinity;
+  return null;
+}
+
+/**
+ * How many tests actually ran, or `null` when it cannot be read.
+ *
+ * Guards the other silent false negative: a `testCommand` that matches NO tests
+ * exits 0, so the baseline looks green and every mutation "survives" against a suite
+ * that never ran. Zero is an error; unreadable is only a warning, because the exit
+ * code — not this — is what decides a mutation.
+ */
+function testsRan(out) {
+  const match = plain(out).match(/Tests\s+[^\n]*?\((\d+)\)/);
+  if (match) return Number(match[1]);
+  if (/No test files found/i.test(plain(out))) return 0;
+  return null;
 }
 
 const setsDir = join(root, 'tools', 'mutations');
@@ -142,13 +178,27 @@ for (const set of sets) {
    */
   process.stdout.write('baseline ... ');
   const baseline = run(set.testCommand);
-  if (!baseline.ok || failureCount(baseline.out) > 0) {
+  if (!baseline.ok) {
     console.log('FAILING — fix the suite before mutating.');
     console.log(baseline.out.slice(-1500));
     baselineFailed = true;
     continue;
   }
-  console.log('green');
+
+  /*
+   * A command that matches no tests exits 0 and would score every mutation
+   * "survived" against a suite that never ran. Refuse to mutate on that.
+   */
+  const ran = testsRan(baseline.out);
+  if (ran === 0) {
+    console.log('RAN NO TESTS — this testCommand matches nothing; fix it before mutating.');
+    console.log(baseline.out.slice(-1500));
+    baselineFailed = true;
+    continue;
+  }
+  console.log(
+    ran === null ? 'green (count unreadable; verdicts use exit codes)' : `green (${ran})`,
+  );
 
   for (const mutation of set.mutations) {
     const path = join(root, mutation.file);
@@ -174,7 +224,7 @@ for (const set of sets) {
     dirty.set(path, original);
     writeFileSync(path, original.replace(mutation.find, mutation.replace), 'utf8');
 
-    const { out } = run(set.testCommand);
+    const outcome = run(set.testCommand);
 
     writeFileSync(path, original, 'utf8');
     dirty.delete(path);
@@ -187,15 +237,23 @@ for (const set of sets) {
       process.exit(1);
     }
 
-    const failures = failureCount(out);
-    const label =
-      failures === Infinity
+    /*
+     * THE VERDICT IS THE EXIT CODE. The suite exits non-zero when it notices the
+     * mutation — that is the runner's own answer, and it holds whatever the output
+     * looks like. The parsed count only decorates the row; when it cannot be read
+     * the mutation is still CAUGHT, because the process already said so.
+     */
+    const caught = !outcome.ok;
+    const failures = failureCount(outcome.out);
+    const label = !caught
+      ? '*** SURVIVED ***'
+      : failures === Infinity
         ? 'caught (did not compile)'
-        : failures > 0
+        : typeof failures === 'number'
           ? `caught (${failures} failed)`
-          : '*** SURVIVED ***';
+          : 'caught (non-zero exit)';
     results.push({ set: set.file, mutation: mutation.name, result: label });
-    process.stdout.write(failures > 0 ? '.' : 'S');
+    process.stdout.write(caught ? '.' : 'S');
   }
   process.stdout.write('\n');
 }

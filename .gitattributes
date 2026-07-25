@@ -1,0 +1,18 @@
+# Normalize line endings so a checkout is byte-identical on every machine.
+#
+# This box has `core.autocrlf=true`, so without this file a fresh checkout rewrites
+# every LF to CRLF in the working tree. That silently broke the E3 mutation set:
+# patterns that span lines with `\n` stopped matching the CRLF source, and the
+# mutation harness reads the working tree verbatim (`readFileSync`). Pin LF and the
+# tree the harness reads is the tree that was committed, everywhere.
+* text=auto eol=lf
+
+# Binaries git might misdetect — never touch their bytes.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ico binary

@@ -5,6 +5,8 @@ coverage/
 .vite/
 *.tsbuildinfo
 
+graphify-out/
+
 .DS_Store
 Thumbs.db
 

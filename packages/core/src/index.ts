@@ -190,11 +190,16 @@ export {
   setProperty,
   unsetProperty,
   setDeclarations,
+  setClassOrder,
   scopeKeys,
   orphanedRules,
   validateStyleSheet,
 } from './style/stylesheet.ts';
 export type { StyleSheet } from './style/stylesheet.ts';
+
+/* Style — the compiler. ONE of these, shared by the canvas (D) and the exporter (I). */
+export { compileStyleSheet, ruleSelector, nodeClassName } from './style/compile.ts';
+export type { CompileOptions } from './style/compile.ts';
 
 /* Style — cascade resolution */
 export {
@@ -296,6 +301,7 @@ export type { Node } from './node/node.ts';
 /* Node — tree */
 export {
   createTree,
+  buildNodeTree,
   getNode,
   hasNode,
   nodeCount,
@@ -378,7 +384,26 @@ export {
   renameProject,
   classUsage,
   usedAssets,
+  orphanedAssets,
   orphanedNodeScopes,
   validateProject,
 } from './document/project.ts';
 export type { Project, ProjectSettings } from './document/project.ts';
+
+/* Document — serialization (Phase F1). Maps <-> JSON-safe arrays, schema-versioned. */
+export {
+  SCHEMA_VERSION,
+  serializeProject,
+  createDocumentFile,
+  deserializeProject,
+  deserializeDocumentFile,
+} from './document/serialize.ts';
+export type {
+  PageFileV1,
+  ProjectFileV1,
+  DocumentFile,
+  LoadedDocument,
+  DeserializeError,
+  DeserializeProjectResult,
+  DeserializeDocumentResult,
+} from './document/serialize.ts';
