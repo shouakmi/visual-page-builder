@@ -127,5 +127,43 @@ export function runStorageAdapterContractTests(
       const loaded = await adapter.loadAssetBytes(missingAssetId);
       expect(loaded).toEqual({ ok: false, error: { kind: 'not-found' } });
     });
+
+    it('lists stored asset ids and omits deleted ones', async () => {
+      const adapter = makeAdapter();
+      const bytes = () => new Blob(['x'], { type: 'text/plain' });
+      const idB = unsafeId<AssetId>('asset-b');
+
+      const before = await adapter.listAssetIds();
+      expect(before).toEqual({ ok: true, value: [] });
+
+      await adapter.saveAssetBytes(assetId, bytes(), 'text/plain');
+      await adapter.saveAssetBytes(idB, bytes(), 'text/plain');
+
+      const after = await adapter.listAssetIds();
+      expect(after.ok).toBe(true);
+      if (after.ok) expect([...after.value].toSorted()).toEqual([assetId, idB].toSorted());
+
+      await adapter.deleteAssetBytes(assetId);
+      const pruned = await adapter.listAssetIds();
+      expect(pruned).toEqual({ ok: true, value: [idB] });
+    });
+
+    it('preserves asset bytes exactly — binary fidelity, not just text', async () => {
+      const adapter = makeAdapter();
+      const original = new Uint8Array([0, 1, 2, 127, 128, 253, 254, 255]);
+      const saved = await adapter.saveAssetBytes(
+        assetId,
+        new Blob([original], { type: 'application/octet-stream' }),
+        'application/octet-stream',
+      );
+      expect(saved.ok).toBe(true);
+
+      const loaded = await adapter.loadAssetBytes(assetId);
+      expect(loaded.ok).toBe(true);
+      if (loaded.ok) {
+        const roundTripped = new Uint8Array(await loaded.value.arrayBuffer());
+        expect([...roundTripped]).toEqual([...original]);
+      }
+    });
   });
 }

@@ -82,3 +82,7 @@ export type {
   EditorStoreOptions,
   SaveState,
 } from './store.ts';
+
+/* Autosave — the debounce/trailing policy over the store's save() (F2). */
+export { createAutosaveController, DEFAULT_AUTOSAVE_DEBOUNCE_MS } from './autosave.ts';
+export type { AutosaveController, AutosaveOptions, TimerHandle } from './autosave.ts';

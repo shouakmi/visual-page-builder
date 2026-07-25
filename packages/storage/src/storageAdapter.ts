@@ -69,4 +69,16 @@ export interface StorageAdapter {
   saveAssetBytes(id: AssetId, bytes: Blob, mimeType: string): Promise<StorageResult<void>>;
   loadAssetBytes(id: AssetId): Promise<StorageResult<Blob>>;
   deleteAssetBytes(id: AssetId): Promise<StorageResult<void>>;
+
+  /**
+   * Every asset id that currently has bytes stored — the enumeration byte
+   * garbage collection needs (F3).
+   *
+   * Byte GC finds stored bytes with no live metadata by subtracting the loaded
+   * project's asset ids from THIS set; there is no other way to discover an
+   * orphaned blob, since bytes outlive the document that referenced them. It
+   * returns storage *keys*, not trusted assets — like `loadDocument`, an adapter
+   * reports what it holds and never vouches for its meaning.
+   */
+  listAssetIds(): Promise<StorageResult<readonly AssetId[]>>;
 }

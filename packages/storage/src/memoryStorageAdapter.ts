@@ -67,5 +67,9 @@ export function createMemoryStorageAdapter(): StorageAdapter {
       assets.delete(id);
       return storageOk(undefined);
     },
+
+    async listAssetIds() {
+      return storageOk([...assets.keys()]);
+    },
   };
 }

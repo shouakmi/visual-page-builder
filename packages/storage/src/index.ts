@@ -10,6 +10,12 @@ export { storageErr, storageOk } from './storageAdapter.ts';
 /* The in-memory adapter — tests today, the desktop-shaped contract fake in F4. */
 export { createMemoryStorageAdapter } from './memoryStorageAdapter.ts';
 
+/* The real, browser-backed adapter (F2). Injects its IDBFactory — see the file. */
+export {
+  createIndexedDbStorageAdapter,
+  type IndexedDbStorageAdapterOptions,
+} from './indexedDbStorageAdapter.ts';
+
 /**
  * `storageAdapter.contract.ts` (the shared test suite every adapter runs) is
  * DELIBERATELY not exported here. It imports `vitest`, a devDependency; barrel
