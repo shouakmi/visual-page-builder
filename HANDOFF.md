@@ -10,10 +10,11 @@ the news.
 
 ## Where we are
 
-**Phases A–E COMPLETE, and Phase F persistence through F2 COMPLETE. F1 (contract + serialization +
-headless store wiring) is COMMITTED as `8083c7b`; F2 (real IndexedDB adapter + autosave + New/Save/Open
-UI) is implemented, fully green, and sitting UNCOMMITTED in the working tree pending review/approval —
-see "Phase F" below before doing anything else.**
+**Phases A–E COMPLETE, and Phase F COMPLETE through F4 — with ONE item deliberately left open: the
+load-time asset byte-GC sweep (see "Phase F3" and `docs/phase-j-sqlite.md` §9). F1–F3 are merged to
+`main` via PR #1 (`31ffbd2`). F4 (the desktop-shaped adapter, the strengthened shared contract, and
+`docs/phase-j-sqlite.md`) is implemented and fully green on branch `phase-f4`, UNCOMMITTED, pending
+review — see "Phase F4" below before doing anything else.**
 Click to select, shift/ctrl to multi-select, a tracking overlay. Drag: `dropTarget` (where),
 `dragMachine` (when), `dragController` + the `resolveDrop` DOM adapter, pointer capture, a live
 `DropIndicator`. Resize: eight `ResizeHandles` grips → `resizeSize` (how big: edge direction, min
@@ -38,22 +39,24 @@ section below for the full design record and what's still open (F3–F4).
 
 | | |
 | --- | --- |
-| Last session | 2026-07-23 — F2 implemented across four approved slices: A `IndexedDbStorageAdapter` (`@vpb/storage`), B `createAutosaveController` (`@vpb/state`), C `DocumentBar`/`persistence.ts` (`apps/web`), D the `f2-indexeddb`/`f2-autosave`/`f2-ui` mutation sets + these docs. **Not yet committed** — stopped for review per the approved plan. F1 beneath it is committed as `8083c7b`. |
-| Git | branch **`phase-e`**, **29 commits ahead of `main` @ `6da69ce`**; HEAD is the F1 commit **`8083c7b`**. **Not pushed, not merged.** F2's changes are uncommitted in the working tree. |
-| Working tree | **Dirty** — F2's new/modified files, not yet committed (see "Phase F → What F2 shipped" for the exact file list). `.claude/settings.local.json` is also modified and is deliberately excluded from commits. |
-| `pnpm verify` | Green — typecheck, lint, encoding, **1078 tests across 52 files**, build (verified locally 2026-07-23, with F2's changes in the working tree) |
-| `pnpm mutate` | Green — **224/224 caught**, zero survivors, zero stale, zero ambiguous, exit 0 (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14, E4 16, E5 17, F1 18, **F2 20**) |
+| Last session | 2026-07-25 — F4 implemented across five approved slices: A the `desktopShapedStorageAdapter` (`@vpb/storage`), B three new UNIVERSAL clauses on the shared contract, C the adapter's own desktop-specific tests, D `docs/phase-j-sqlite.md`, E the `f4-desktop` mutation set + these docs. Committed as five focused commits (below); **not pushed, no PR opened yet**. |
+| Git | branch **`phase-f4`**, based on `main` @ **`31ffbd2`** (the PR #1 merge carrying F1–F3), **5 commits ahead**: `d0403cd` the adapter, `3969d94` the strengthened contract, `226e451` the Phase J design record, `f9f17c0` the mutation set, and this docs commit. **Not pushed, not merged.** |
+| Working tree | **Clean** after the five commits. `.claude/settings.local.json` is deliberately excluded from all of them, and `graphify-out/` is gitignored (`3c43fea`). |
+| `pnpm verify` | Green — typecheck, lint, encoding, **1158 tests across 59 files**, build (verified locally 2026-07-25, with F4's changes in the working tree) |
+| `pnpm mutate` | Green — **265/265 caught**, zero survivors, zero stale, zero ambiguous, exit 0 (A 19, B2 9, B3 19, C 26, D1 12, D2 12, D3 9, D4 8, E1 7, E2 18, E3 14, E4 16, E5 17, F1 18, F2 20, F3 31, **F4 10**) |
 
 Done: **A**, **B1**, **B2**, **B3**, **C**, all of **D** (D1–D4), all of **E** (E1 selection, E2
 structural drag, E3 resize, E4 multi-select ops + batching, E5 snap guides), **F1** (persistence
-contract + serialization + headless store wiring — committed `8083c7b`), and **F2** (IndexedDB adapter +
-autosave + New/Save/Open UI — uncommitted, awaiting review).
+contract + serialization + headless store wiring), **F2** (IndexedDB adapter + autosave + New/Save/Open
+UI), **F3** (assets — model, storage, resolver, commands, upload pipeline, canvas read path; byte GC
+deliberately open), and **F4** (the desktop-shaped contract proof + the Phase J design record —
+uncommitted, awaiting review).
 
-> Test counts by project: `core` 544, `state` 212, `interaction` 73, `storage` 21, `renderer` 52,
-> `tokens` 48, `ui` 34, `web` 94 = 1078.
+> Test counts by project: `core` 549, `state` 223, `interaction` 73, `storage` 51, `renderer` 52,
+> `tokens` 48, `ui` 34, `web` 128 = 1158.
 >
-> The branch is `phase-e` and carries all of D, all of E, the committed F1 (`8083c7b`), and F2's
-> uncommitted working-tree changes.
+> `storage` is 51 because the shared contract's 12 clauses run against THREE adapters (36), plus each
+> adapter's own specifics.
 
 **The canvas is interactive.** On top of the D4 wiring (`Canvas.tsx` reads `present`, compiles with
 `compileStyleSheet`, renders through `RenderChildren` inside a `CanvasFrame`, sizes to the active
@@ -389,7 +392,8 @@ contract-tested, but no product code writes assets yet — `orphanedAssets` in c
 degradation in the renderer; content-hash dedup deferred, but the API is shaped so it can be added later
 without a breaking change). **F4** (the `StorageAdapter` contract proven against a desktop-shaped fake; a
 written plan for Phase J's real SQLite — no Electron, no `better-sqlite3`, no Node-specific DB code
-introduced in F).
+introduced in F). That written plan now exists: [`docs/phase-j-sqlite.md`](./docs/phase-j-sqlite.md),
+which also records the cross-document byte-GC hazard in §9 and the decisions still open in §10.
 
 **Owed opportunistically (not a coverage gap):** on-screen confirmation of the real IndexedDB adapter +
 autosave + New/Save/Open in a paintable browser. jsdom does no layout and the Browser pane never paints
@@ -443,6 +447,86 @@ live ids from `listAssetIds` and reaps the orphans. This remains its own F3 slic
 **Owed opportunistically (not blocking closure):** on-screen confirmation in a paintable browser of the
 full round-trip (upload → assign → paint → save → reopen). jsdom does no layout and the Browser pane never
 paints here, so tests + mutation sets are the verification to date.
+
+---
+
+## Phase F4 — where it stands
+
+**COMPLETE, uncommitted on `phase-f4`.** F4's brief was narrow and deliberately so: prove the
+`StorageAdapter` contract against a **desktop-shaped fake**, and write down the plan for Phase J's real
+SQLite adapter. No Electron, no `better-sqlite3`, no Node-specific DB code — none was added.
+
+### Why a third adapter at all
+
+The memory and IndexedDB adapters both round-trip through the **structured clone** algorithm. So the
+shared contract, for all its cross-adapter framing, only ever proved agreement *within one
+serialization family*. Phase J's SQLite adapter is a different family — a JSON **text** column plus a
+**binary** column — and a contract never exercised there is untested exactly where it is most likely to
+break. Reusing the memory adapter as "the desktop fake" (which its own file comment used to claim, and
+which `index.ts` echoed) would have bought nothing; both comments are corrected.
+
+### What F4 shipped
+
+- **`packages/storage/src/desktopShapedStorageAdapter.ts`** (new) —
+  `createDesktopShapedStorageAdapter({ tables? })`. Documents persist as a JSON **text** column
+  (`JSON.stringify` on write, `JSON.parse` on read); asset bytes as a **binary** column (`Blob` →
+  `Uint8Array<ArrayBuffer>` on write, the `Blob` REBUILT on read from the bytes plus a separately
+  stored `mime_type`). `listDocuments` reads denormalised `id`/`name`/`updatedAt` columns and never
+  parses a payload. Errors map by driver **result code** (`SQLITE_FULL` → `quota-exceeded`,
+  `SQLITE_CORRUPT`/`SQLITE_NOTADB` → `corrupt`, else `io-error`) — the desktop analogue of F2's mapping
+  by DOMException name. **A test fixture, not a host adapter**: nothing in `apps/web` constructs it.
+- **The seam is two plain `Map`s** (`DesktopTables`), injected — the same discipline as F2's
+  `IDBFactory`. A test provokes a real failure with a `Map` subclass whose `set`/`get` throws, and
+  reaches the "stored text will not parse" branch by writing a corrupt row directly, which no public
+  write path can produce. No mocking framework, no abstraction that exists only for tests.
+- **Three new UNIVERSAL clauses on the shared contract** (9 → 12, so `storage` gains 3 × 3 = 9 tests):
+  a REAL project document — built through core's own API and `createDocumentFile`, not a hand-written
+  literal — survives the round trip under `toStrictEqual`; an asset's mime type survives it; and no
+  adapter hands back a reference the caller holds. **All three passed on all three adapters with no
+  adapter change**, which is the result, not a shortcut: `DocumentFile` is genuinely JSON-clean because
+  core omits absent optional fields rather than assigning `undefined`.
+- **8 desktop-specific tests** in the adapter's own file, never in the shared suite. Every injected
+  failure asserts the `StorageError` kind **and** that no partial persistence occurred: the target row
+  unchanged, other rows unchanged, and the failed id NOT enumerable. That last clause matters because a
+  half-written asset id is exactly what a future byte-GC pass would act on.
+- **`docs/phase-j-sqlite.md`** (new) — the schema, the transaction model, the Electron boundary, the
+  error taxonomy, the build implications, what the fake does and does not prove, the testing plan, the
+  byte-GC hazard, and four open decisions.
+- **Mutations**: `tools/mutations/f4-desktop.mjs` — **10, all caught**, each a regression that could
+  plausibly land in the real SQLite implementation.
+
+### The load-bearing findings, so nobody reverses them
+
+- **SERIALIZE BEFORE THE WRITE.** `saveDocument` builds the payload string and only then writes the
+  row. Write-then-serialize means a document that cannot be represented as JSON has already destroyed
+  the user's last good save and stored nothing in its place. Pinned by
+  *`leaves a good row intact when the replacing payload cannot be serialized`* and by the highest-value
+  mutation in the set.
+- **`listDocuments` MUST NOT PARSE PAYLOADS.** Beyond cost: one corrupt document would otherwise take
+  down the entire project manager, so the user sees an error instead of their nine healthy projects.
+- **The mime type needs its own column**, because a binary column is typeless. Now a *shared* contract
+  clause, so Phase J inherits it whether or not it remembers.
+- **`@vpb/storage`'s production code has no RUNTIME dependency on `@vpb/core`** — every core import in
+  the four production files is `import type`; the only runtime imports are internal. Verified while
+  writing the Phase J plan. This means building the package for Electron main does not drag
+  `@vpb/core` along, and it is worth actively protecting: one runtime core import would double the
+  main-process build overnight.
+- **The fake UNDER-promises.** Its atomicity is per-call and effectively single-statement; real
+  SQLite's is genuinely transactional, which is stronger. So satisfying the fake implies satisfying
+  SQLite, not the reverse. That asymmetry is deliberate — a fake promising *more* than the contract
+  would let Phase J ship something that passes here and loses data in production.
+
+### Still open after F4 — and it is not F4's to close
+
+The **load-time asset byte-GC sweep** (an F3 slice). Recorded in full as `docs/phase-j-sqlite.md` §9,
+including the hazard that makes it non-trivial: asset bytes are stored **globally** (one `assets` store
+keyed by bare `AssetId`, no document scoping) while `usedAssets` is **per-document**, so the naive
+`listAssetIds() − loadedProject.assets` sweep would delete the bytes belonging to every OTHER saved
+document. Four design options are recorded there with no preference; none is chosen, and Phase J does
+not need it resolved to ship a SQLite adapter.
+
+**Owed opportunistically:** nothing new. F4 is headless by construction and adds no browser-facing
+surface, so it carries none of the on-screen confirmation debt E2–E5 and F2–F3 do.
 
 ---
 

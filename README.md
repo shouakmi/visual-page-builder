@@ -2,7 +2,8 @@
 
 An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web from one codebase.
 
-> **Status: Phases A–E complete, plus web persistence through F2 — the canvas is fully interactive and documents save, autosave, and reopen.** The workspace
+> **Status: Phases A–F complete — the canvas is fully interactive, documents save, autosave and reopen,
+> assets upload and paint, and the storage contract is proven across three adapters.** The workspace
 > installs, typechecks, lints, tests, builds, and themes; `@vpb/core` carries the style/cascade/document
 > model (B1–B3) **and the style compiler** (D1), and `@vpb/state` carries commands, undo/redo, and a
 > headless store (C). Phase D closed the loop end to end: `@vpb/renderer` turns the node tree into
@@ -44,12 +45,22 @@ An enterprise-grade, open-source visual page builder. Desktop (Electron) and Web
 > `IDBFactory` so it stays node-testable through `fake-indexeddb`), an autosave controller in `@vpb/state`
 > (debounced through an injected timer seam, never overlapping a save, never firing while a gesture is
 > `pending`, always trailing an edit made during a save), and a minimal New/Save/Open document toolbar in
-> `apps/web` that surfaces every failure rather than presenting it as success. F3 (assets) is next. See
+> `apps/web` that surfaces every failure rather than presenting it as success. **Phase F3 adds assets**:
+> the asset model and `usedAssets`/`orphanedAssets` reporting in `@vpb/core`, real asset-byte storage on the
+> IndexedDB adapter, an `asset:<id>` → `blob:` resolver owning its object-URL lifetime end to end, asset
+> commands, the upload pipeline and panel, and the canvas read path that feeds the renderer a *resolved*
+> library. **Phase F4 closes the phase**: a third `StorageAdapter` — a desktop-shaped fake that persists a
+> document as a JSON **text** column and asset bytes as a **binary** column — so the cross-adapter contract
+> suite is finally proven across both serialization families rather than only within the structured-clone
+> one the other two share. The shared contract gained three universal clauses in the process, and
+> [`docs/phase-j-sqlite.md`](./docs/phase-j-sqlite.md) records the real SQLite adapter's design. See
 > the [Roadmap](#roadmap).
 
 See [`HANDOFF.md`](./HANDOFF.md) for where work stopped and what to pick up next, and
 [`AUDIT.md`](./AUDIT.md) for the technical audit of the prior prototype that this codebase replaces,
 including the reasoning behind the roadmap ordering.
+[`docs/phase-j-sqlite.md`](./docs/phase-j-sqlite.md) is the design record for Phase J's real SQLite
+adapter — schema, transactions, the Electron boundary — written in F4 and not yet implemented.
 
 ---
 
@@ -106,10 +117,13 @@ packages/
   interaction/          @vpb/interaction — drag, resize and snap geometry + lifecycle machines. Headless (E2–E5)
   renderer/             @vpb/renderer — the node tree as escaped React, in a sandboxed iframe (D2/D3)
   storage/              @vpb/storage — the StorageAdapter contract, its cross-adapter test suite, the
-                                        in-memory adapter (F1), and the IndexedDB adapter (F2). Headless;
-                                        injects its IDBFactory; depends on @vpb/core only
+                                        in-memory adapter (F1), the IndexedDB adapter (F2), and the
+                                        desktop-shaped fake (F4). Headless; injects its IDBFactory;
+                                        depends on @vpb/core only — and in production code, only for TYPES
   tokens/               @vpb/tokens — design tokens: palette, semantic scale, theme.css
   ui/                   @vpb/ui     — design system: theming, primitives, app shell
+docs/
+  phase-j-sqlite.md                   F4: the design record for Phase J's real SQLite adapter
 tools/                  repo scripts
   mutate.mjs                          mutation-testing harness (see Testing)
   mutations/                          mutation sets, one file per phase — data, not code
@@ -386,6 +400,40 @@ updates too late to guard a double-click). `window.indexedDB` is read at exactly
 and handed to `createBrowserStorage`, keeping every browser-specific concern in the app and out of
 `@vpb/state` and `@vpb/storage`.
 
+### F4: a third adapter, because two of them agreed for the same reason
+
+The memory and IndexedDB adapters both round-trip through the **structured clone** algorithm — the
+first calls `structuredClone` explicitly, the second gets it from IndexedDB. So while the shared
+contract proved the two agree, it only ever proved agreement *within one serialization family*. Phase
+J's SQLite adapter belongs to a different one: a document is a JSON **text** column and asset bytes
+are a **binary** column. A contract never exercised against that family is a contract that has not
+been tested where it is most likely to break.
+
+`createDesktopShapedStorageAdapter` is that second family — pure TypeScript, no driver, no file, no
+SQL, running in the same node Vitest project as everything else in `@vpb/storage`. It is a **test
+fixture, not a host adapter**: nothing in `apps/web` constructs it. What it buys is that anything in
+`DocumentFile` which survives a structured clone but not `JSON.stringify`/`JSON.parse` — a stray
+`Map`, a `Date`, an explicitly-`undefined` field — now fails in a node test rather than in Phase J
+against a real user's project.
+
+Three clauses were added to the **shared** contract as a result, and all three hold for all three
+adapters: a real project document (built through core's own API, not a hand-written literal) survives
+the round trip under `toStrictEqual`; an asset's mime type survives it; and no adapter ever hands back
+a reference the caller holds. The first is the interesting one — `toEqual` treats a missing key and an
+`undefined`-valued key as the same thing, which is exactly the difference between the two families, so
+under `toEqual` that divergence is invisible. It passes today because core omits absent optional
+fields rather than assigning `undefined` (`createNode`'s `...(overrides.name === undefined ? {} : …)`,
+which `exactOptionalPropertyTypes` enforces upstream). If that discipline ever lapses, the desktop
+adapter's copy of that test is what fails.
+
+**What the fake proves and does not prove is written down**, in
+[`docs/phase-j-sqlite.md`](./docs/phase-j-sqlite.md), along with the proposed schema, the
+serialize-before-write transaction rule, the Electron main/renderer boundary, and the driver-code →
+`StorageError` mapping. It proves serialization-model independence; it proves nothing about SQLite,
+locking, migrations, durability, or IPC security. Its atomicity is per-call and single-statement,
+where real SQLite's is genuinely transactional — so the fake **under-promises**, which is the safe
+direction: an adapter satisfying it will satisfy real SQLite, and not the reverse.
+
 ### Tokens are enforced, not documented
 
 `semantic.ts` (TypeScript) and `theme.css` (CSS custom properties) are two representations of one
@@ -419,19 +467,24 @@ One runner, one project per package, each with the environment it needs (`vitest
 
 | Project    | Environment | Covers                                                  | Status          |
 | ---------- | ----------- | ------------------------------------------------------- | --------------- |
-| `core`     | node        | The model: style, cascade, compiler, tree, document, serialization (F1) | 544 tests |
-| `state`    | node        | Commands, inverses, history, batching, the store, save/load/isDirty (F1), autosave (F2) | 212 tests |
+| `core`     | node        | The model: style, cascade, compiler, tree, document, serialization (F1), assets (F3) | 549 tests |
+| `state`    | node        | Commands, inverses, history, batching, the store, save/load/isDirty (F1), autosave (F2), asset commands (F3) | 223 tests |
 | `interaction` | node     | Drag, resize and snap geometry, and the state machines   | 73 tests        |
-| `storage`  | node        | The `StorageAdapter` contract, the in-memory adapter (F1), the IndexedDB adapter (F2) | 21 tests |
+| `storage`  | node        | The `StorageAdapter` contract across THREE adapters — in-memory (F1), IndexedDB (F2), desktop-shaped (F4) — plus each adapter's own specifics | 51 tests |
 | `renderer` | jsdom       | Escaped rendering, the sandboxed frame, the hit-test handle | 52 tests     |
 | `tokens`   | node        | Token contract, CSS/TS parity, colour distinction       | 48 tests        |
 | `ui`       | jsdom       | Theme resolution, persistence, DOM, a11y, keyboard      | 34 tests        |
-| `web`      | jsdom       | Canvas wiring (D4), selection (E1), drag/resize/keyboard/snap controllers (E2–E5), persistence UI + wiring (F2) | 94 tests |
+| `web`      | jsdom       | Canvas wiring (D4), selection (E1), drag/resize/keyboard/snap controllers (E2–E5), persistence UI + wiring (F2), asset upload/panel/resolver + canvas read path (F3) | 128 tests |
 
 ```bash
-pnpm test                        # everything (1078 today)
+pnpm test                        # everything (1158 today)
 pnpm vitest run --project core   # one project
 ```
+
+> **The contract suite runs three times.** `runStorageAdapterContractTests` is imported and called by
+> each adapter's own test file, so its 12 clauses are asserted against every implementation. Adapter
+> specifics — a `QuotaExceededError` mapping for IndexedDB, a `SQLITE_FULL` one for the desktop fake —
+> stay in the adapter's own file, never in the shared suite.
 
 > The `web` project runs in jsdom because the canvas test renders into an iframe.
 > The `index.html` bootstrap test opts back to node with a `// @vitest-environment
@@ -461,7 +514,7 @@ pnpm mutate --list         # show what would run, change nothing
 pnpm mutate --filter cycle # one mutation by name
 ```
 
-Every phase is built this way; **224 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
+Every phase is built this way; **265 mutations are all caught** — 19 for A, 9 for B2, 19 for B3, 26 for
 C, 12 for D1, 12 for D2 (the renderer: escaping, `isSafeUrl`, the `componentId -> React` map), 9 for D3
 (the sandboxed frame: the `sandbox` attribute, incremental reconciliation), 8 for D4 (the app wiring:
 `present` vs `committed`, the active page, the per-page node filter, device sizing), 7 for E1 (the
@@ -494,7 +547,16 @@ and a failed open cached so no later call can retry; the autosave controller: th
 dirty guard, the debounce reset, the trailing save, the in-flight flag, and dispose's timer cancel; the
 persistence UI: **a failed list reading as an empty "no documents" list**, a swallowed save failure, a
 swallowed load failure, New not creating, Open bypassing the store, and the `createBrowserStorage` /
-`attachAutosave` wiring guards).
+`attachAutosave` wiring guards), 31 for F3 (the asset model and `usedAssets`/`orphanedAssets`; the
+`listAssetIds` enumeration on both adapters; the asset commands; the upload pipeline and panel; the
+resolver's object-URL lifecycle — caching, revocation on eviction and on dispose, a URL minted after
+disposal; and the canvas read path), and **10 for F4** (the desktop-shaped adapter, each one a
+regression that could plausibly land in the real SQLite implementation: **a failed serialize clobbering
+the good row already stored**, `INSERT` where `INSERT OR REPLACE` was meant, a TEXT column handed back
+unparsed, `SQLITE_FULL`/`SQLITE_CORRUPT` mapped to a generic `io-error`, `listDocuments` parsing every
+payload instead of reading the name column, a `Blob` rebuilt without its `mime_type` column, the `Blob`
+bound to the binary column instead of its bytes, a delete that deletes nothing, and the wrong table in
+the enumeration query).
 
 Phase A's set is the argument for the whole practice. The rewritten `tokens`/`ui` suites passed on
 their first run, which proves only that they were written against code that already passed them.
@@ -579,7 +641,7 @@ the code still compiles and the tests still pass — which is precisely why it i
 | **C**  | **Commands, inverse-command history, Zustand store — headless and testable. ✅** |
 | **D**  | **Renderer + style compiler + sandboxed canvas, wired into the app; the shared-compiler WYSIWYG invariant. ✅ Done.** |
 | **E** | **Interaction: overlay, structural drag, resize, multi-select ops + batching, snap guides. ✅ Done (E1–E5).** |
-| **F** | **Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets. F1 (contract + serialize + store, headless) ✅. F2 (real IndexedDB adapter + autosave + New/Save/Open UI) ✅. F3 (assets), F4 (desktop interface) next.** |
+| **F** | **Persistence: `StorageAdapter` → IndexedDB (web) + SQLite (desktop); assets. F1 (contract + serialize + store, headless) ✅. F2 (real IndexedDB adapter + autosave + New/Save/Open UI) ✅. F3 (assets: model, storage, resolver, commands, upload, canvas read path) ✅ — load-time byte GC deliberately still open. F4 (desktop-shaped contract proof + the Phase J SQLite design record) ✅.** |
 | G     | HTML/CSS importer — the validator of the Phase B model                      |
 | H     | Style panel + component library                                             |
 | I     | Export: HTML/CSS/JS/ZIP/JSON via the shared compiler, then PNG/JPG/SVG/PDF  |
