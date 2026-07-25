@@ -384,6 +384,7 @@ export {
   renameProject,
   classUsage,
   usedAssets,
+  orphanedAssets,
   orphanedNodeScopes,
   validateProject,
 } from './document/project.ts';

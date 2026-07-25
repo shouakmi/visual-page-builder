@@ -5,15 +5,17 @@ import { defaultBreakpoints } from '../style/breakpoints.ts';
 import { nodeScope, parseScopeKey, type StyleScope } from '../style/rule.ts';
 import type { StyleSheet } from '../style/stylesheet.ts';
 import {
+  allRules,
   EMPTY_STYLESHEET,
   putRule,
   removeScope,
   rulesForScope,
   scopeKeys,
 } from '../style/stylesheet.ts';
+import { referencedAssets as referencedStyleAssets } from '../style/values.ts';
 import { nodesWithClass, treeAssets } from '../node/tree.ts';
-import type { AssetLibrary } from './asset.ts';
-import { EMPTY_ASSET_LIBRARY } from './asset.ts';
+import type { Asset, AssetLibrary } from './asset.ts';
+import { allAssets, EMPTY_ASSET_LIBRARY } from './asset.ts';
 import type { Page } from './page.ts';
 import { createPage, normalizePath, validatePage } from './page.ts';
 
@@ -275,10 +277,36 @@ export function usedAssets(project: Project): readonly AssetId[] {
   for (const page of project.pages) {
     for (const asset of treeAssets(page.tree)) out.add(asset);
   }
+  // Style rules reference assets too — a class's `background-image: url(...)`, or
+  // a node-local rule's — and those rules live in the project stylesheet, not in
+  // any node's props, so `treeAssets` alone never sees them. Missing this scan
+  // makes such an asset look unused, and orphan detection would then offer it for
+  // deletion: silent data loss.
+  for (const rule of allRules(project.styles)) {
+    for (const value of Object.values(rule.declarations)) {
+      if (value) referencedStyleAssets(value, out);
+    }
+  }
   for (const asset of [project.settings.favicon, ...project.pages.map((p) => p.seo.ogImage)]) {
     if (asset) out.add(asset);
   }
   return [...out];
+}
+
+/**
+ * Assets in the library that nothing references — the unused-asset sweep.
+ *
+ * The complement of `usedAssets` over the WHOLE project (node props, style rules,
+ * favicon, page ogImage). NON-DESTRUCTIVE by contract: an uploaded-but-unplaced
+ * asset is "unused" by design, so this REPORTS candidates for the panel and a
+ * manual, undoable delete — it never licenses automatic deletion. The same stance
+ * as `orphanedNodeScopes` and `orphanedRules`: the model surfaces leaks, it does
+ * not destroy the user's work. Returns the `Asset` records, not bare ids, so the
+ * panel can show a name and size without a second lookup.
+ */
+export function orphanedAssets(project: Project): readonly Asset[] {
+  const used = new Set<AssetId>(usedAssets(project));
+  return allAssets(project.assets).filter((asset) => !used.has(asset.id));
 }
 
 /**

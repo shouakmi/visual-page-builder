@@ -40,6 +40,13 @@ export type { CommandPlan } from './commands/nodeCommands.ts';
 /* Transactions — several commands, one history entry (the answer to AUDIT §7.3). */
 export { batchCommand } from './commands/batch.ts';
 
+/* Asset library — add, rename, remove metadata records (F3). Bytes live elsewhere. */
+export {
+  addAssetCommand,
+  renameAssetCommand,
+  removeAssetCommand,
+} from './commands/assetCommands.ts';
+
 export {
   setStylePropertyCommand,
   setStylePropertiesCommand,

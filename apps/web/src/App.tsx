@@ -3,13 +3,18 @@ import {
   MOBILE_BREAKPOINT_ID,
   TABLET_BREAKPOINT_ID,
   createBuiltinRegistry,
+  createIdFactory,
   type BreakpointId,
 } from '@vpb/core';
 import { createEditorStore } from '@vpb/state';
 import { AppShell, Button, Panel, ThemeToggle } from '@vpb/ui';
 import { useStore } from 'zustand';
 
+import { AssetPanel } from './AssetPanel.tsx';
 import { Canvas } from './Canvas.tsx';
+import { createAssetResolver } from './assetResolver.ts';
+import { DocumentBar } from './DocumentBar.tsx';
+import { attachAutosave, createBrowserStorage } from './persistence.ts';
 import { starterProject } from './starterProject.ts';
 
 /**
@@ -29,10 +34,48 @@ import { starterProject } from './starterProject.ts';
  * and must not be rebuilt by a re-render. Phase F replaces the starter project
  * with a file the user opened; nothing else here changes.
  */
+const ids = createIdFactory();
+
+/**
+ * The browser's persistence, wired once. `indexedDB` is read here — the single
+ * browser-specific line — and handed to `createBrowserStorage`; everything
+ * downstream takes the resulting adapter (or `null`). Autosave is attached only
+ * when an adapter exists, and the document toolbar renders only then.
+ */
+const storage = createBrowserStorage(typeof indexedDB === 'undefined' ? undefined : indexedDB);
+
 const store = createEditorStore({
   project: starterProject(),
   env: { registry: createBuiltinRegistry() },
+  ...(storage ? { storage } : {}),
 });
+
+const autosave = attachAutosave(store, storage);
+
+/**
+ * The host asset resolver, wired once (Phase F3, Slice F). It bridges a managed
+ * asset's opaque `asset:<id>` src to a live `blob:` URL by loading its bytes
+ * through the adapter — the one place `URL.createObjectURL` belongs. Null without
+ * storage: there are no managed assets to resolve then. Its object-URL lifetime is
+ * the page's, disposed on hot-replace alongside the autosave controller below.
+ */
+const assetResolver = storage
+  ? createAssetResolver({ loadBytes: (id) => storage.loadAssetBytes(id) })
+  : null;
+
+/**
+ * Dispose the page-scoped controllers when this module is hot-replaced in dev, so
+ * an orphaned autosave timer can't fire against a discarded store and an orphaned
+ * resolver can't strand its object URLs. In production there is no earlier owner to
+ * clean up after: the page's lifetime IS their lifetime, and unload needs no
+ * teardown.
+ */
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    autosave?.dispose();
+    assetResolver?.dispose();
+  });
+}
 
 function Roadmap({ items }: { items: Array<{ phase: string; label: string }> }) {
   return (
@@ -121,6 +164,12 @@ export function App() {
           <span className="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-[10px] text-foreground-subtle">
             v0.1.0 · Phase D
           </span>
+          {storage && (
+            <>
+              <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+              <DocumentBar store={store} adapter={storage} ids={ids} />
+            </>
+          )}
           <div className="ml-auto flex items-center gap-1">
             <DeviceSwitcher />
             <span className="mx-1 h-5 w-px bg-border" aria-hidden />
@@ -149,11 +198,15 @@ export function App() {
             />
           </Panel>
           <Panel title="Assets">
-            <Roadmap items={[{ phase: 'F', label: 'Durable binary storage' }]} />
+            {storage ? (
+              <AssetPanel store={store} adapter={storage} ids={ids} />
+            ) : (
+              <Roadmap items={[{ phase: 'F', label: 'Durable binary storage' }]} />
+            )}
           </Panel>
         </>
       }
-      center={<Canvas store={store} />}
+      center={<Canvas store={store} resolver={assetResolver} />}
       right={
         <>
           <Panel title="Style">

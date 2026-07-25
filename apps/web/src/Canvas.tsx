@@ -22,6 +22,8 @@ import { ResizeHandles } from './ResizeHandles.tsx';
 import { SelectionLayer } from './SelectionLayer.tsx';
 import { snapTargets } from './snapTargets.ts';
 import { SnapGuides } from './SnapGuides.tsx';
+import type { AssetResolver } from './assetResolver.ts';
+import { useResolvedAssets } from './useResolvedAssets.ts';
 
 /**
  * The canvas: the active page, compiled and rendered.
@@ -48,9 +50,15 @@ const renderers = createBuiltinRenderers();
 
 export interface CanvasProps {
   readonly store: StoreApi<EditorStore>;
+  /**
+   * The host asset resolver (Slice F). Turns a managed asset's `asset:<id>` src
+   * into a live `blob:` URL so an uploaded image paints. Optional/null when there
+   * is no storage adapter — there are no managed assets to resolve then.
+   */
+  readonly resolver?: AssetResolver | null;
 }
 
-export function Canvas({ store }: CanvasProps) {
+export function Canvas({ store, resolver }: CanvasProps) {
   const present = useStore(store, (state) => state.present);
   const page = activePage(present);
 
@@ -68,10 +76,15 @@ export function Canvas({ store }: CanvasProps) {
     [present.project.styles, present.project.breakpoints, page.tree],
   );
 
-  const env = useMemo(
-    () => ({ registry, renderers, assets: present.project.assets }),
-    [present.project.assets],
-  );
+  /**
+   * A managed asset carries the opaque `asset:<id>` src in the model; the renderer
+   * degrades it to no `src` because it is not a loadable URL. Feeding the RESOLVED
+   * library here — not `present.project.assets` — is what makes an uploaded image
+   * paint. The resolved library changes identity only when the model library does,
+   * so the reconciler still sees a stable `env` between unrelated edits.
+   */
+  const assets = useResolvedAssets(resolver ?? null, present.project.assets);
+  const env = useMemo(() => ({ registry, renderers, assets }), [assets]);
 
   /**
    * The frame is sized to the active breakpoint so the REAL media queries fire.
