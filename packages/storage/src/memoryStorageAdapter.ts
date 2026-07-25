@@ -11,10 +11,14 @@ interface StoredAsset {
 /**
  * In-process storage adapter. Every method resolves, never throws.
  *
- * Two roles: F1's store tests use it as the one real `StorageAdapter` there is
- * before a browser or a desktop host exists, and the desktop-shaped contract
- * run (F4) exercises the SAME contract suite against it, since it assumes
- * nothing about any one platform's quirks.
+ * F1's store tests use it as the one real `StorageAdapter` there is before a
+ * browser or a desktop host exists.
+ *
+ * NOT the desktop-shaped fake, despite what this comment claimed until F4:
+ * `structuredClone` puts it in the SAME serialization family as the IndexedDB
+ * adapter, so running the contract against both proves nothing about the JSON
+ * text + binary column model a SQLite adapter uses. That is
+ * `desktopShapedStorageAdapter.ts`'s job.
  *
  * `structuredClone` on every read and write, deliberately — a real adapter
  * (IndexedDB explicitly uses the structured clone algorithm; a JSON-backed
